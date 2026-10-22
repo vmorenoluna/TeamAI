@@ -63,10 +63,10 @@ export function usePhaseSync(opts?: UsePhaseSyncOptions) {
         // Role Refinement Assistant — a failure analysis finished; refresh so
         // the inline card shows the verdict.
         router.refresh();
-      } else if (data.type === 'task-updated') {
+      } else if (data.type === 'task-updated' || data.type === 'action-result') {
         // Generic task mutation (TaskStore write) not covered by the events
         // above — e.g. human feedback routed, artifacts cleared, dependency
-        // or title edits, pause/resume. Same debounced refresh as phase-change
+        // or title edits, pause/resume, background action results. Same debounced refresh as phase-change
         // so rapid bursts of writes don't each trigger their own refresh.
         if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = setTimeout(() => {

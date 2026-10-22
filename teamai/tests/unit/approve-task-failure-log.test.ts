@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
@@ -35,7 +35,7 @@ function makeCtx() {
     wakeupProgressPath: undefined,
   };
 
-  // Collect advancePhase calls so we can inspect eventExtra on the rollback.
+  // Collect advancePhase calls so we can assert no rollback happens.
   const advancePhaseCalls: Array<{ phase: string; eventExtra?: Record<string, unknown> }> = [];
 
   const deps = {
@@ -57,12 +57,11 @@ function makeCtx() {
   return { root, specPath, pipeline, deps, advancePhaseCalls };
 }
 
-describe('approveTask failure logging', () => {
+describe('approveTask failure propagation', () => {
   let ctx: ReturnType<typeof makeCtx>;
 
   beforeEach(() => {
     ctx = makeCtx();
-    // Write a minimal spec.md so logToOutput can resolve specPath correctly.
     writeFileSync(join(ctx.specPath, 'spec.md'), '# test');
   });
 
@@ -70,91 +69,58 @@ describe('approveTask failure logging', () => {
     rmSync(ctx.root, { recursive: true, force: true });
   });
 
-  it('logs the error to output.log and includes awaitingReviewReason in the rollback eventExtra for local-merge', async () => {
-    const execErr = new Error('push rejected: branch is behind');
-    ctx.deps.executePhase.mockRejectedValueOnce(execErr);
+  it('re-throws the error and does not roll back to awaiting-review for local-merge', async () => {
+    ctx.deps.executePhase.mockRejectedValueOnce(new Error('push rejected: branch is behind'));
 
     await expect(
       approveTask('task-1', 'local-merge', ctx.deps as any),
     ).rejects.toThrow('push rejected: branch is behind');
 
-    // Two advancePhase calls: one to 'merge' (forward), one to 'awaiting-review' (rollback).
-    expect(ctx.advancePhaseCalls).toHaveLength(2);
+    // Only the forward advance; failure handling belongs to the run lifecycle.
+    expect(ctx.advancePhaseCalls).toHaveLength(1);
     expect(ctx.advancePhaseCalls[0].phase).toBe('merge');
-
-    const rollback = ctx.advancePhaseCalls[1];
-    expect(rollback.phase).toBe('awaiting-review');
-    expect(rollback.eventExtra).toBeDefined();
-    expect(rollback.eventExtra!.awaitingReviewReason).toBe('push rejected: branch is behind');
-    expect(rollback.eventExtra!.fromPhase).toBe('merge');
-
-    // Verify output.log contains the error.
-    const logPath = join(ctx.specPath, 'output.log');
-    expect(existsSync(logPath)).toBe(true);
-    const logContent = readFileSync(logPath, 'utf-8');
-    expect(logContent).toContain('[ERROR] Approval failed (merge): push rejected: branch is behind');
+    expect(ctx.advancePhaseCalls.some(c => c.eventExtra?.awaitingReviewReason !== undefined)).toBe(false);
+    expect(ctx.pipeline.phase).toBe('merge');
   });
 
-  it('logs the error to output.log and includes awaitingReviewReason in the rollback eventExtra for pull-request', async () => {
-    const execErr = new Error('gh auth token expired');
-    ctx.deps.executePhase.mockRejectedValueOnce(execErr);
+  it('re-throws the error and does not roll back to awaiting-review for pull-request', async () => {
+    ctx.deps.executePhase.mockRejectedValueOnce(new Error('gh auth token expired'));
 
     await expect(
       approveTask('task-1', 'pull-request', ctx.deps as any),
     ).rejects.toThrow('gh auth token expired');
 
-    expect(ctx.advancePhaseCalls).toHaveLength(2);
+    expect(ctx.advancePhaseCalls).toHaveLength(1);
     expect(ctx.advancePhaseCalls[0].phase).toBe('create-pr');
-
-    const rollback = ctx.advancePhaseCalls[1];
-    expect(rollback.phase).toBe('awaiting-review');
-    expect(rollback.eventExtra!.awaitingReviewReason).toBe('gh auth token expired');
-    expect(rollback.eventExtra!.fromPhase).toBe('create-pr');
-
-    const logContent = readFileSync(join(ctx.specPath, 'output.log'), 'utf-8');
-    expect(logContent).toContain('[ERROR] Approval failed (create-pr): gh auth token expired');
+    expect(ctx.pipeline.phase).toBe('create-pr');
   });
 
-  it('preserves structured error codes in eventExtra when present', async () => {
+  it('propagates structured error codes unchanged', async () => {
     const execErr: Error & { code?: string } = new Error('rate limit exceeded');
     execErr.code = 'RATE_LIMIT';
     ctx.deps.executePhase.mockRejectedValueOnce(execErr);
 
     await expect(
       approveTask('task-1', 'local-merge', ctx.deps as any),
-    ).rejects.toThrow('rate limit exceeded');
-
-    const rollback = ctx.advancePhaseCalls[1];
-    expect(rollback.eventExtra!.awaitingReviewReason).toBe('rate limit exceeded');
-    expect(rollback.eventExtra!.errorCode).toBe('RATE_LIMIT');
+    ).rejects.toBe(execErr);
   });
 
-  it('handles non-Error rejections and still logs a String representation', async () => {
+  it('propagates non-Error rejections unchanged', async () => {
     ctx.deps.executePhase.mockRejectedValueOnce('plain string rejection');
 
     await expect(
       approveTask('task-1', 'local-merge', ctx.deps as any),
     ).rejects.toBe('plain string rejection');
-
-    const rollback = ctx.advancePhaseCalls[1];
-    expect(rollback.eventExtra!.awaitingReviewReason).toBe('plain string rejection');
-    // No errorCode for non-Error — the check is `'code' in err`.
-
-    const logContent = readFileSync(join(ctx.specPath, 'output.log'), 'utf-8');
-    expect(logContent).toContain('[ERROR] Approval failed (merge): plain string rejection');
+    expect(ctx.advancePhaseCalls).toHaveLength(1);
   });
 
-  it('does not mutate the global pipeline state before rolling back', async () => {
-    // When executePhase throws, the pipeline is rolled back to awaiting-review.
-    // The intermediate next-phase advance must be undone.
-    const execErr = new Error('rebase conflict');
-    ctx.deps.executePhase.mockRejectedValueOnce(execErr);
+  it('does not write its own [ERROR] line (the run lifecycle logs it)', async () => {
+    ctx.deps.executePhase.mockRejectedValueOnce(new Error('rebase conflict'));
 
     await expect(
       approveTask('task-1', 'pull-request', ctx.deps as any),
     ).rejects.toThrow('rebase conflict');
 
-    // After rollback, pipeline.phase must be 'awaiting-review'.
-    expect(ctx.pipeline.phase).toBe('awaiting-review');
+    expect(existsSync(join(ctx.specPath, 'output.log'))).toBe(false);
   });
 });

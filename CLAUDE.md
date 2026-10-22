@@ -179,6 +179,15 @@ Without this, re-enabling auto mode only picks up *future* phase-change events �
 
 **CI polling:** After a PR is created (`pr-open` phase), auto mode polls `gh pr view` every 30 seconds. When all status checks pass, it auto-merges via `gh pr merge --merge`, calls `markTaskDone`, and sets `autoProcessed: true` on the task. The UI shows a "Mark Reviewed" button for auto-processed tasks so the user can acknowledge they reviewed the auto-merged PR.
 
+### Background Server Actions
+
+Next.js runs one client's server actions serially, so a slow action (`git worktree remove`, `gh`, Docker, a pipeline phase) blocks every other click. Slow work in `src/app/actions/` therefore **starts and returns immediately** through `runInBackground()` (`src/lib/background-actions.ts`), which returns an `operationId`; never fire-and-forget with `.catch(logError)` — a swallowed rejection turns a failure into silent success.
+
+- **Result delivery:** when the work settles, `runInBackground` emits `action-result` on the process manager and `server.ts` broadcasts it over the existing WebSocket as `{type: 'action-result', operationId, action, taskId, ok, error}` (`src/lib/action-result-message.ts`). Settled results are also kept in a registry, queryable through the `getBackgroundActionResult(operationId)` server action.
+- **`notify` modes:** `always` for operations a component tracks (success and failure are both reported); `failure-only` for untracked fire-and-forget calls (only a failure is reported).
+- **Client side:** `src/lib/background-action-client.ts` is a client-only registry of the operations this tab started. Components call `useBackgroundAction()` (`src/hooks/use-background-action.ts`), whose `start()` tracks the id *before* invoking the action (the result can beat the HTTP response) and resolves with `{ok, error}`. The global `BackgroundActionFailureBanner` (mounted in `layout.tsx`) receives every `action-result`, settles tracked operations, and shows any *unclaimed* failure itself. It recovers missed results (socket gap, reconnect) by polling `getBackgroundActionResult` for still-pending ids. `use-phase-sync` refreshes the UI on `action-result`.
+- **Failure and Retry:** a rejected pipeline-phase operation leaves the task in `failed`, so the single Retry action (`retryTask`) resumes it at the recorded phase. This includes approval: if the merge/create-pr phase fails after `approveTask`, the failure goes through `_handleRunFailure` and the task lands in `failed`. Do not add per-operation retry buttons.
+
 ### Container Validation Gate
 
 With container mode on, an invalid container setup **always blocks** — it is never a warning. `ContainerManager.ensureContainer()` (the singleton is created with `enforceValidation: true`) only hands out a container whose current setup has passed validation, and throws `ContainerValidationError` (`CONTAINER_INVALID`) otherwise. The orchestrator also runs the same check before a task starts and before each phase (`_requireValidContainer`, next to the Docker-missing gate), so a task never starts in — or spends tokens on — an environment that cannot build the project.

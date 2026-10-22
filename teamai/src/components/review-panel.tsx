@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { approveTask, markTaskDone } from '@/app/actions/tasks';
 import { useServerMutation } from '@/hooks/use-server-mutation';
+import { useBackgroundAction, type BackgroundActionStart } from '@/hooks/use-background-action';
 import { formatActionError } from '@/lib/error-format';
 import { RejectFeedbackPanel } from './reject-feedback-panel';
 
@@ -83,13 +84,16 @@ type PendingAction = 'approve-local' | 'approve-pr' | 'mark-done' | null;
 
 export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl, phase, specRevision, specPath, subtasks, awaitingReviewReason }: Props) {
   const { run } = useServerMutation();
+  const { start } = useBackgroundAction();
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [error, setError] = useState<string | null>(null);
   const isPrOpen = phase === 'pr-open' || !!prUrl;
 
   /**
    * Run a Server Action with full error + pending state management:
-   * - Set the pending label while the action runs (button shows its spinner text)
+   * - Set the pending label until the operation settles — the server action returns
+   *   as soon as the work is started, so the label stays set until the result is
+   *   delivered over the WebSocket, not just until the action returns
    * - Clear any previous error at the start
    * - On throw (or returned error), set an error message visible in the banner —
    *   this is the regression fix: previously, thrown errors were swallowed by
@@ -97,19 +101,21 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
    * - Always clear pendingAction via finally, even on failure
    * - Re-throw so useServerMutation skips router.refresh() on failure
    */
-  async function runAction<T>(
+  async function runAction(
     label: PendingAction,
     verb: string,
-    fn: () => Promise<T>,
+    fn: (operationId: string) => Promise<BackgroundActionStart>,
   ): Promise<void> {
     setPendingAction(label);
     setError(null);
     run(async () => {
       try {
-        await fn();
-      } catch (err) {
-        setError(formatActionError(verb, err));
-        throw err;
+        const outcome = await start(fn);
+        if (!outcome.ok) {
+          const err = new Error(outcome.error);
+          setError(formatActionError(verb, err));
+          throw err;
+        }
       } finally {
         setPendingAction(null);
       }
@@ -120,12 +126,12 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
     await runAction(
       strategy === 'local-merge' ? 'approve-local' : 'approve-pr',
       strategy === 'local-merge' ? 'merge task' : 'create pull request',
-      () => approveTask(taskId, strategy),
+      operationId => approveTask(taskId, strategy, operationId),
     );
   }
 
   async function handleMarkDone() {
-    await runAction('mark-done', 'mark task as done', () => markTaskDone(taskId));
+    await runAction('mark-done', 'mark task as done', operationId => markTaskDone(taskId, operationId));
   }
 
   return (

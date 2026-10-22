@@ -12,15 +12,15 @@ import { processManager } from '@/lib/process-manager';
 import { revalidatePath } from 'next/cache';
 import type { PlanData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
-import { existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { getResumePhaseForFailedTask, getAwaitingReviewReason } from '@/lib/task-utils';
 import { getRoleRefinementConfig, suggestionsForTask, type RoleRefinementMode, type RoleRefinementSuggestion } from '@/lib/role-refinement';
 import { join, resolve } from 'path';
-import { readdir, readFile } from 'fs/promises';
+import { readdir, readFile, rm } from 'fs/promises';
 import { NO_STOP_PHASES, RESTARTABLE_PHASES } from '@/constants/phases';
 import { execGitQueued, removeStaleWorktreeRegistration } from '@/lib/orchestrator/worktree-utils';
 import { isFeedbackTarget, type FeedbackTarget } from '@/lib/orchestrator/feedback-target';
-import { error as logError } from '@/lib/logger';
+import { runInBackground, isBackgroundPending } from '@/lib/background-actions';
 import { preRestoreFailedTask, taskHasSpecConcerns } from '@/lib/task-retry';
 
 /**
@@ -61,11 +61,15 @@ export async function createTask(formData: FormData) {
   return { id };
 }
 
-export async function moveTask(taskId: string, targetPhase: string) {
-  const { orchestrator } = await getStores();
-  // Fire-and-forget (pipeline runs async)
-  orchestrator.moveTaskToPhase(taskId, targetPhase).catch(err => logError('tasks', `moveTask ${taskId} failed`, err));
+export async function moveTask(taskId: string, targetPhase: string, operationId?: string): Promise<{ operationId: string }> {
+  const { orchestrator, projectPath } = await getStores();
+  // Fire-and-forget (pipeline runs async); a rejection is reported over the WebSocket
+  const opId = runInBackground(
+    { operationId, action: 'move', taskId, projectRoot: projectPath, notify: 'failure-only' },
+    () => orchestrator.moveTaskToPhase(taskId, targetPhase),
+  );
   revalidatePath('/');
+  return { operationId: opId };
 }
 
 export async function deleteTask(taskId: string) {
@@ -82,7 +86,7 @@ export async function bulkDeleteTasks(taskIds: string[]) {
   revalidatePath('/');
 }
 
-export async function retryTask(taskId: string): Promise<{ success: boolean; error?: string }> {
+export async function retryTask(taskId: string, operationId?: string): Promise<{ success: boolean; error?: string; operationId?: string }> {
   const { taskStore, orchestrator, projectPath } = await getStores();
   const read = await readTaskForAction(taskStore, taskId);
   if (read.error !== undefined) return { success: false, error: read.error };
@@ -125,9 +129,12 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
   orchestrator.clearPipelineStateFile(taskDir);
 
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
-  orchestrator.moveTaskToPhase(taskId, resumePhase).catch(err => logError('tasks', `retryTask ${taskId} failed`, err));
+  const opId = runInBackground(
+    { operationId, action: 'retry', taskId, projectRoot: projectPath, notify: 'failure-only' },
+    () => orchestrator.moveTaskToPhase(taskId, resumePhase),
+  );
   revalidatePath('/');
-  return { success: true };
+  return { success: true, operationId: opId };
 }
 
 /**
@@ -146,11 +153,12 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
 export async function retryTaskWithOptions(
   taskId: string,
   phase: string,
-): Promise<{ success: boolean; error?: string }> {
+  operationId?: string,
+): Promise<{ success: boolean; error?: string; operationId?: string }> {
   // "Resume where it failed" is the same operation as a phase-less retry.
-  if (phase === RESUME_AUTO) return retryTask(taskId);
+  if (phase === RESUME_AUTO) return retryTask(taskId, operationId);
 
-  const { taskStore, orchestrator } = await getStores();
+  const { taskStore, orchestrator, projectPath } = await getStores();
   const read = await readTaskForAction(taskStore, taskId);
   if (read.error !== undefined) return { success: false, error: read.error };
   const task = read.task;
@@ -171,9 +179,12 @@ export async function retryTaskWithOptions(
   orchestrator.clearPipelineStateFile(taskDir);
 
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
-  orchestrator.moveTaskToPhase(taskId, phase).catch(err => logError('tasks', `stopTask ${taskId} failed`, err));
+  const opId = runInBackground(
+    { operationId, action: 'retry', taskId, projectRoot: projectPath, notify: 'failure-only' },
+    () => orchestrator.moveTaskToPhase(taskId, phase),
+  );
   revalidatePath('/');
-  return { success: true };
+  return { success: true, operationId: opId };
 }
 
 export async function pauseTask(taskId: string): Promise<{ success: boolean; error?: string }> {
@@ -200,8 +211,8 @@ export async function pauseTask(taskId: string): Promise<{ success: boolean; err
   return { success: true };
 }
 
-export async function resumeTask(taskId: string): Promise<{ success: boolean; error?: string }> {
-  const { taskStore, orchestrator } = await getStores();
+export async function resumeTask(taskId: string, operationId?: string): Promise<{ success: boolean; error?: string; operationId?: string }> {
+  const { taskStore, orchestrator, projectPath } = await getStores();
   const read = await readTaskForAction(taskStore, taskId);
   if (read.error !== undefined) return { success: false, error: read.error };
   const task = read.task;
@@ -216,14 +227,18 @@ export async function resumeTask(taskId: string): Promise<{ success: boolean; er
   taskStore.update(taskId, { isPaused: false, rateLimitedUntil: undefined, wakeupUntil: undefined });
 
   // Resume from current phase — re-run the pipeline at whatever phase the task was in
-  orchestrator.moveTaskToPhase(taskId, task.phase).catch(err => logError('tasks', `restartPhase ${taskId} failed`, err));
+  const opId = runInBackground(
+    { operationId, action: 'resume', taskId, projectRoot: projectPath, notify: 'failure-only' },
+    () => orchestrator.moveTaskToPhase(taskId, task.phase),
+  );
   revalidatePath('/');
   revalidatePath(`/task/${taskId}`);
-  return { success: true };
+  return { success: true, operationId: opId };
 }
 
-export async function stopTask(taskId: string): Promise<{ success: boolean; error?: string }> {
+export async function stopTask(taskId: string, operationId?: string): Promise<{ success: boolean; error?: string; operationId?: string }> {
   const { taskStore, orchestrator, projectPath } = await getStores();
+  if (isBackgroundPending('stop', taskId)) return { success: false, error: 'Stop is already in progress for this task' };
   const read = await readTaskForAction(taskStore, taskId);
   if (read.error !== undefined) return { success: false, error: read.error };
   const task = read.task;
@@ -234,25 +249,36 @@ export async function stopTask(taskId: string): Promise<{ success: boolean; erro
   // Cancel the running pipeline
   orchestrator.cancelPipeline(taskId);
 
-  // Clean up artifacts: keep completed phase artifacts, remove in-progress ones.
-  // Awaited — Defect 8's reconciliation may retry cherry-picks after an infra
-  // hiccup (reprovisioning the container), so this must settle before the
-  // task moves to 'backlog' below.
-  await orchestrator.cleanupTaskArtifacts(taskId, task.phase);
+  // Pause while the cleanup runs: recovery (sweepStalledTasks,
+  // autoResumeInterruptedTasks) and auto mode skip isPaused tasks, so none of
+  // them re-adopts the task mid-cleanup. Also clears stale rate-limit/wakeup
+  // timestamps, as pauseTask does.
+  taskStore.update(taskId, { isPaused: true, rateLimitedUntil: undefined, wakeupUntil: undefined });
 
-  // Clear paused state when moving to backlog (belt-and-suspenders)
-  taskStore.update(taskId, { isPaused: false });
+  const opId = runInBackground(
+    { operationId, action: 'stop', taskId, projectRoot: projectPath, notify: 'always' },
+    async () => {
+      // Clean up artifacts: keep completed phase artifacts, remove in-progress ones.
+      // Defect 8's reconciliation may retry cherry-picks after an infra hiccup
+      // (reprovisioning the container), so this must settle before the task
+      // moves to 'backlog' below. On rejection the task stays paused in its phase.
+      await orchestrator.cleanupTaskArtifacts(taskId, task.phase);
 
-  // Move to backlog
-  taskStore.updatePhase(taskId, 'backlog');
-  processManager.emit('phase-change', { taskId, phase: 'backlog', projectRoot: projectPath });
+      // Clear paused state when moving to backlog
+      taskStore.update(taskId, { isPaused: false });
+
+      // Move to backlog
+      taskStore.updatePhase(taskId, 'backlog');
+      processManager.emit('phase-change', { taskId, phase: 'backlog', projectRoot: projectPath });
+    },
+  );
   revalidatePath('/');
   revalidatePath(`/task/${taskId}`);
-  return { success: true };
+  return { success: true, operationId: opId };
 }
 
-export async function playTask(taskId: string): Promise<{ success: boolean; error?: string }> {
-  const { taskStore, orchestrator } = await getStores();
+export async function playTask(taskId: string, operationId?: string): Promise<{ success: boolean; error?: string; operationId?: string }> {
+  const { taskStore, orchestrator, projectPath } = await getStores();
   const read = await readTaskForAction(taskStore, taskId);
   if (read.error !== undefined) return { success: false, error: read.error };
   const task = read.task;
@@ -261,13 +287,16 @@ export async function playTask(taskId: string): Promise<{ success: boolean; erro
   if (task.phase !== 'backlog') return { success: false, error: `Task is in "${task.phase}" phase, not "backlog"` };
 
   // Resume the task — detects completed artifacts and fast-forwards to the next phase
-  orchestrator.resumeTask(taskId).catch(err => logError('tasks', `restart ${taskId} failed`, err));
+  const opId = runInBackground(
+    { operationId, action: 'play', taskId, projectRoot: projectPath, notify: 'failure-only' },
+    () => orchestrator.resumeTask(taskId),
+  );
   revalidatePath('/');
-  return { success: true };
+  return { success: true, operationId: opId };
 }
 
-export async function restartCurrentPhase(taskId: string): Promise<{ success: boolean; error?: string }> {
-  const { taskStore, orchestrator } = await getStores();
+export async function restartCurrentPhase(taskId: string, operationId?: string): Promise<{ success: boolean; error?: string; operationId?: string }> {
+  const { taskStore, orchestrator, projectPath } = await getStores();
   const read = await readTaskForAction(taskStore, taskId);
   if (read.error !== undefined) return { success: false, error: read.error };
   const task = read.task;
@@ -276,6 +305,12 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
   if (!RESTARTABLE_PHASES.has(task.phase)) {
     return { success: false, error: `Cannot restart task in "${task.phase}" phase` };
   }
+
+  const restart = (work: () => Promise<unknown>): string => runInBackground(
+    { operationId, action: 'restart-phase', taskId, projectRoot: projectPath, notify: 'failure-only' },
+    work,
+  );
+  let opId: string;
 
   if (task.phase === 'qa-review') {
     // For qa-review: just re-run QA without re-implementing.
@@ -290,7 +325,7 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
     // any in-flight pipeline before touching artifacts.
     orchestrator.cancelPipeline(taskId);
     taskStore.clearArtifacts(taskId, 'qa');
-    orchestrator.runTask(taskId, task.description, 'qa-review').catch(err => logError('tasks', `restartCurrentPhase ${taskId} failed`, err));
+    opId = restart(() => orchestrator.runTask(taskId, task.description, 'qa-review'));
   } else if (task.phase === 'implement') {
     // For implement: reset subtask completions in plan.json so the UI shows a fresh
     // slate. moveTaskToPhase clears QA artifacts but doesn't touch plan.json subtask
@@ -314,41 +349,72 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
         writeFileSync(planPath, JSON.stringify(plan, null, 2));
       } catch { /* best-effort */ }
     }
-    orchestrator.runTask(taskId, task.description, 'implement').catch(err => logError('tasks', `restartPhase ${taskId} failed`, err));
+    opId = restart(() => orchestrator.runTask(taskId, task.description, 'implement'));
   } else {
     // spec / plan: moveTaskToPhase handles clearing stale artifacts
     // and setting the correct startPhase (e.g. spec redoes everything,
     // plan redoes plan→implement→qa).
-    orchestrator.moveTaskToPhase(taskId, task.phase).catch(err => logError('tasks', `restartPhase ${taskId} failed`, err));
+    opId = restart(() => orchestrator.moveTaskToPhase(taskId, task.phase));
   }
 
   revalidatePath('/');
   revalidatePath(`/task/${taskId}`);
-  return { success: true };
+  return { success: true, operationId: opId };
 }
 
-export async function runTask(taskId: string) {
-  const { taskStore, orchestrator } = await getStores();
+export async function runTask(taskId: string, operationId?: string): Promise<{ operationId: string }> {
+  const { taskStore, orchestrator, projectPath } = await getStores();
   const task = await taskStore.getByIdAsync(taskId);
   if (!task) throw new Error(`Task ${taskId} not found`);
   // orchestrator.runTask reaches persistAndEmitPhase (the authoritative
   // phase-change write) synchronously before any I/O-bound await, so the UI
   // sees the new phase promptly without this action persisting it up front —
   // see the crash-safety comments on moveTaskToPhase/resumeTask.
-  orchestrator.runTask(taskId, task.description).catch(err => logError('tasks', `restartFromSpec ${taskId} failed`, err));
+  const opId = runInBackground(
+    { operationId, action: 'run', taskId, projectRoot: projectPath, notify: 'failure-only' },
+    () => orchestrator.runTask(taskId, task.description),
+  );
   revalidatePath('/');
+  return { operationId: opId };
 }
 
-export async function approveTask(taskId: string, strategy: 'local-merge' | 'pull-request') {
-  const { orchestrator } = await getStores();
-  await orchestrator.approveTask(taskId, strategy);
+export async function approveTask(
+  taskId: string,
+  strategy: 'local-merge' | 'pull-request',
+  operationId?: string,
+): Promise<{ success: boolean; error?: string; operationId?: string }> {
+  const { taskStore, orchestrator, projectPath } = await getStores();
+  if (isBackgroundPending('approve', taskId)) return { success: false, error: 'Approve is already in progress for this task' };
+  const read = await readTaskForAction(taskStore, taskId);
+  if (read.error !== undefined) return { success: false, error: read.error };
+  const task = read.task;
+  if (!task) return { success: false, error: 'Task not found' };
+  if (task.phase !== 'awaiting-review') {
+    return { success: false, error: `Task is in phase "${task.phase}", not "awaiting-review"` };
+  }
+  const opId = runInBackground(
+    { operationId, action: 'approve', taskId, projectRoot: projectPath, notify: 'always' },
+    () => orchestrator.approveTask(taskId, strategy),
+  );
   revalidatePath('/');
+  return { success: true, operationId: opId };
 }
 
-export async function markTaskDone(taskId: string) {
-  const { orchestrator } = await getStores();
-  await orchestrator.markTaskDone(taskId);
+export async function markTaskDone(
+  taskId: string,
+  operationId?: string,
+): Promise<{ success: boolean; error?: string; operationId?: string }> {
+  const { taskStore, orchestrator, projectPath } = await getStores();
+  if (isBackgroundPending('mark-done', taskId)) return { success: false, error: 'Mark done is already in progress for this task' };
+  const read = await readTaskForAction(taskStore, taskId);
+  if (read.error !== undefined) return { success: false, error: read.error };
+  if (!read.task) return { success: false, error: 'Task not found' };
+  const opId = runInBackground(
+    { operationId, action: 'mark-done', taskId, projectRoot: projectPath, notify: 'always' },
+    () => orchestrator.markTaskDone(taskId),
+  );
   revalidatePath('/');
+  return { success: true, operationId: opId };
 }
 
 export async function rejectTask(taskId: string, feedback: string, target: string, subtaskIds?: number[]) {
@@ -598,48 +664,48 @@ export async function checkTaskWorktree(taskId: string): Promise<{ exists: boole
   return { exists: await pathExists(wtPath), path: wtPath };
 }
 
-export async function deleteTaskWorktree(taskId: string): Promise<{ success: boolean; error?: string }> {
+export async function deleteTaskWorktree(taskId: string, operationId?: string): Promise<{ success: boolean; error?: string; operationId?: string }> {
   const { taskStore, orchestrator } = await getStores();
   const projectPath = await getActiveProjectPath();
+  if (isBackgroundPending('delete-worktree', taskId)) {
+    return { success: false, error: 'Delete worktree is already in progress for this task' };
+  }
   const read = await readTaskForAction(taskStore, taskId);
   if (read.error !== undefined) return { success: false, error: read.error };
   const task = read.task;
   if (!task || !task.branch) return { success: false, error: 'No branch found for this task' };
   const wtPath = orchestrator.getWorktreePath(taskId);
   if (!wtPath || !existsSync(wtPath)) return { success: false, error: 'Worktree directory not found on disk' };
-  // ── Gap 5a: Safety guard — never rmSync the project root ──
+  // ── Gap 5a: Safety guard — never rm the project root ──
   const resolvedWt = resolve(wtPath);
   const resolvedProject = resolve(projectPath);
   if (resolvedWt === resolvedProject) {
     return { success: false, error: 'Refusing to delete worktree at project root — this would destroy the repository' };
   }
-  try {
-    await execGitQueued(['worktree', 'remove', wtPath], projectPath, projectPath);
-    taskStore.update(taskId, { branch: undefined });
-    revalidatePath('/');
-    revalidatePath(`/task/${taskId}`);
-    return { success: true };
-  } catch {
-    // Normal remove failed (e.g. uncommitted changes) — try --force
-    try {
-      await execGitQueued(['worktree', 'remove', '--force', wtPath], projectPath, projectPath);
-      taskStore.update(taskId, { branch: undefined });
-      revalidatePath('/');
-      revalidatePath(`/task/${taskId}`);
-      return { success: true };
-    } catch {
-      // --force also failed (e.g. files locked) — delete manually and prune
+  const opId = runInBackground(
+    { operationId, action: 'delete-worktree', taskId, projectRoot: projectPath, notify: 'always' },
+    async () => {
       try {
-        rmSync(wtPath, { recursive: true, force: true });
-        await removeStaleWorktreeRegistration(projectPath, wtPath);
-        taskStore.update(taskId, { branch: undefined });
-        revalidatePath('/');
-        revalidatePath(`/task/${taskId}`);
-        return { success: true };
-      } catch (e) {
-        const err = e as { stderr?: string; message?: string };
-        return { success: false, error: err.stderr || err.message || 'Failed to remove worktree' };
+        await execGitQueued(['worktree', 'remove', wtPath], projectPath, projectPath);
+      } catch {
+        // Normal remove failed (e.g. uncommitted changes) — try --force
+        try {
+          await execGitQueued(['worktree', 'remove', '--force', wtPath], projectPath, projectPath);
+        } catch {
+          // --force also failed (e.g. files locked) — delete manually and prune
+          try {
+            await rm(wtPath, { recursive: true, force: true });
+            await removeStaleWorktreeRegistration(projectPath, wtPath);
+          } catch (e) {
+            const err = e as { stderr?: string; message?: string };
+            throw new Error(err.stderr || err.message || 'Failed to remove worktree');
+          }
+        }
       }
-    }
-  }
+      taskStore.update(taskId, { branch: undefined });
+    },
+  );
+  revalidatePath('/');
+  revalidatePath(`/task/${taskId}`);
+  return { success: true, operationId: opId };
 }

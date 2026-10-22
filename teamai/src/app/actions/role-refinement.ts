@@ -19,9 +19,10 @@ import {
 } from '@/lib/role-refinement';
 import { retryTask } from './tasks';
 import { error as logError } from '@/lib/logger';
+import { runInBackground } from '@/lib/background-actions';
 
 /** Start a manual failure analysis (fire-and-forget). Guards mode !== 'off' and phase === 'failed'. */
-export async function analyzeFailedTask(taskId: string): Promise<{ success: boolean; error?: string }> {
+export async function analyzeFailedTask(taskId: string, operationId?: string): Promise<{ success: boolean; error?: string; operationId?: string }> {
   const projectPath = await getActiveProjectPath();
   const config = getRoleRefinementConfig(projectPath);
   if (config.mode === 'off') {
@@ -45,9 +46,11 @@ export async function analyzeFailedTask(taskId: string): Promise<{ success: bool
   revalidatePath('/');
   revalidatePath(`/task/${taskId}`);
 
-  analyzeFailure(projectPath, taskId, 'manual', makeRoleRefinementAnalyzeDeps())
-    .catch(err => logError('role-refinement', `analyzeFailure ${taskId} failed`, err));
-  return { success: true };
+  const opId = runInBackground(
+    { operationId, action: 'analyze-failure', taskId, projectRoot: projectPath, notify: 'failure-only' },
+    () => analyzeFailure(projectPath, taskId, 'manual', makeRoleRefinementAnalyzeDeps()),
+  );
+  return { success: true, operationId: opId };
 }
 
 export async function getRoleRefinementConfigAction(): Promise<RoleRefinementConfig> {

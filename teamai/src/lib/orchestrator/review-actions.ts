@@ -268,7 +268,8 @@ async function beginSpecRevision(
 /**
  * Approve a task that is awaiting review. Sets the merge strategy
  * (local-merge or pull-request) and advances to the chosen phase.
- * On failure, rolls back to awaiting-review and re-throws.
+ * A failing phase is not rolled back: the error propagates and the caller's
+ * run lifecycle moves the task to `failed` (so Retry resumes the phase).
  */
 export async function approveTask(
   taskId: string,
@@ -286,27 +287,7 @@ export async function approveTask(
   deps.taskStore.update(taskId, { mergeStrategy: strategy });
   const next = strategy === 'local-merge' ? 'merge' : 'create-pr';
   deps.advancePhase(pipeline, next);
-  try {
-    await deps.executePhase(pipeline);
-  } catch (err) {
-    // Capture error details for the audit trail and rollback event.
-    const errMsg = err instanceof Error ? err.message : String(err);
-    const eventExtra: Record<string, unknown> = {
-      awaitingReviewReason: errMsg,
-      fromPhase: next,
-    };
-    // Preserve structured error code if present (e.g. AUTH, PUSH, CONFLICT).
-    const errCode = (err instanceof Error && 'code' in err) ? (err as Error & { code?: string }).code : undefined;
-    if (errCode) eventExtra.errorCode = errCode;
-
-    // Log to output.log so the reason is visible alongside phase output
-    // (matches the top-level task runner's catch-block pattern).
-    logToOutput(pipeline.specPath, `\n[ERROR] Approval failed (${next}): ${errMsg}\n`);
-
-    // Roll back to awaiting-review with error details in the phase-change event.
-    deps.advancePhase(pipeline, 'awaiting-review', eventExtra);
-    throw err;
-  }
+  await deps.executePhase(pipeline);
 }
 
 /**

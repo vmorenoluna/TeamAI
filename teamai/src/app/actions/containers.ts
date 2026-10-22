@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
+import { runInBackground } from '@/lib/background-actions';
 import { containerManager, checkDockerAvailable, type ContainerState, type ValidationStep, type ValidationStatus } from '@/lib/container-manager';
 
 export interface ContainerConfig {
@@ -50,9 +51,10 @@ export async function saveContainerConfig(config: ContainerConfig): Promise<Cont
     } catch { /* ignore */ }
 
     // Fire-and-forget: (generate +) start + validate in the background
-    containerManager.bootstrapContainer(projectPath).catch(err => {
-      console.error('[container] Bootstrap failed:', err);
-    });
+    runInBackground(
+      { action: 'container-bootstrap', projectRoot: projectPath, notify: 'failure-only' },
+      () => containerManager.bootstrapContainer(projectPath),
+    );
 
     return needsGeneration
       ? { enabled: config.enabled, dockerAvailable: available, generated: true, projectType }
@@ -63,12 +65,14 @@ export async function saveContainerConfig(config: ContainerConfig): Promise<Cont
 }
 
 /** Re-run container validation on demand (clears a "container invalid" block once fixed). */
-export async function revalidateContainer(): Promise<void> {
+export async function revalidateContainer(operationId?: string): Promise<{ operationId: string }> {
   const projectPath = await getActiveProjectPath();
   // Fire-and-forget: progress streams over the container-validation channel.
-  containerManager.revalidate(projectPath).catch(err => {
-    console.error('[container] Re-validation failed:', err);
-  });
+  const opId = runInBackground(
+    { operationId, action: 'container-revalidate', projectRoot: projectPath, notify: 'failure-only' },
+    () => containerManager.revalidate(projectPath),
+  );
+  return { operationId: opId };
 }
 
 /** The last persisted validation result for the active project. */

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useServerMutation } from '@/hooks/use-server-mutation';
+import { useBackgroundAction, type BackgroundActionStart } from '@/hooks/use-background-action';
 import { checkTaskWorktree, deleteTaskWorktree, retryTaskWithOptions, stopTask, pauseTask, resumeTask, playTask } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 import { formatActionError } from '@/lib/error-format';
@@ -52,6 +53,14 @@ interface Props {
 
 const EXCLUDED_SPINNER_PHASES = new Set(['backlog', 'failed', 'merge', 'create-pr', 'done']);
 
+type ActionStartResult = { success: boolean; error?: string; operationId?: string };
+
+/** A background-capable action only counts as started when it succeeded AND returned an operation id. */
+function toBackgroundStart(result: ActionStartResult): BackgroundActionStart {
+  if (result.success && result.operationId) return { success: true, operationId: result.operationId };
+  return { success: false, error: result.error || 'Action did not start' };
+}
+
 export function TaskCard({ task, onSelect, isMoving }: Props) {
   const { run: runRetry, isPending: isRetrying } = useServerMutation();
   const { run: runStop, isPending: isStopping } = useServerMutation();
@@ -59,6 +68,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
   const { run: runResume, isPending: isResuming } = useServerMutation();
   const { run: runPlay, isPending: isStarting } = useServerMutation();
   const { run: runWtDelete } = useServerMutation(); // isolated — uses wtDeleting for UI state
+  const { start: startBackground } = useBackgroundAction();
   const [expanded, setExpanded] = useState(false);
   const [wtStatus, setWtStatus] = useState<{ exists: boolean; path: string | null }>({ exists: false, path: null });
   const [wtChecking, setWtChecking] = useState(!!task.branch);
@@ -85,12 +95,12 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
     setWtDeleting(true);
     runWtDelete(async () => {
       try {
-        const result = await deleteTaskWorktree(task.id);
-        if (result.success) {
+        const outcome = await startBackground(async operationId => toBackgroundStart(await deleteTaskWorktree(task.id, operationId)));
+        if (outcome.ok) {
           setWtStatus({ exists: false, path: null });
           return;
         }
-        throw new Error(result.error || 'Unknown error'); // skip refresh on failure
+        throw new Error(outcome.error || 'Unknown error'); // skip refresh on failure
       } catch (err) {
         alert(formatActionError('delete worktree', err));
         throw err;
@@ -161,8 +171,8 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
     e.stopPropagation();
     runStop(async () => {
       try {
-        const result = await stopTask(task.id);
-        if (!result.success) throw new Error(result.error || 'Unknown error');
+        const outcome = await startBackground(async operationId => toBackgroundStart(await stopTask(task.id, operationId)));
+        if (!outcome.ok) throw new Error(outcome.error || 'Unknown error');
       } catch (err) {
         alert(formatActionError('stop task', err));
         throw err;
