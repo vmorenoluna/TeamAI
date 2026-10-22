@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useServerMutation } from '@/hooks/use-server-mutation';
 import { checkTools, updateToolPath, resetToolPath } from '@/app/actions/tools';
 import type { ToolName, ToolStatus } from '@/lib/tool-checker';
 import { formatActionError } from '@/lib/error-format';
@@ -11,7 +10,6 @@ const STATUS_ORDER: Record<string, number> = {
 };
 
 export function ToolSettings({ initialTools }: { initialTools: ToolStatus[] }) {
-  const { run } = useServerMutation();
   const [tools, setTools] = useState<ToolStatus[]>(
     initialTools.sort((a, b) => (STATUS_ORDER[a.name] ?? 99) - (STATUS_ORDER[b.name] ?? 99))
   );
@@ -41,7 +39,6 @@ export function ToolSettings({ initialTools }: { initialTools: ToolStatus[] }) {
       const updated = await updateToolPath(toolName, newPath || toolName);
       setTools(prev => prev.map(t => t.name === toolName ? updated : t));
       setEditPaths(prev => { const n = { ...prev }; delete n[toolName]; return n; });
-      run(async () => {});
     } catch (err) {
       setError(formatActionError('save tool path', err));
     } finally {
@@ -55,7 +52,6 @@ export function ToolSettings({ initialTools }: { initialTools: ToolStatus[] }) {
       const updated = await resetToolPath(toolName);
       setTools(prev => prev.map(t => t.name === toolName ? updated : t));
       setEditPaths(prev => { const n = { ...prev }; delete n[toolName]; return n; });
-      run(async () => {});
     } catch (err) {
       setError(formatActionError('reset tool path', err));
     } finally {

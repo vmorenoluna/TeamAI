@@ -108,7 +108,7 @@ describe('TaskCard mutation handlers', () => {
       expect(screen.getByText(/fresh QA\/wakeup-attempt budget/)).toBeInTheDocument();
     });
 
-    it('calls retryTaskWithOptions and refreshes router on dialog confirm', async () => {
+    it('calls retryTaskWithOptions and does not refresh router on dialog confirm', async () => {
       mockRetryTaskWithOptions.mockResolvedValue({ success: true, error: '' });
       renderFailedTask();
 
@@ -122,7 +122,7 @@ describe('TaskCard mutation handlers', () => {
       });
 
       expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('failed-1', 'auto');
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
       expect(window.alert).not.toHaveBeenCalled();
     });
 
@@ -204,7 +204,7 @@ describe('TaskCard mutation handlers', () => {
       );
     }
 
-    it('calls pauseTask and refreshes router on success', async () => {
+    it('calls pauseTask and does not refresh router on success', async () => {
       mockPauseTask.mockResolvedValue({ success: true, error: '' });
       renderActiveTask();
 
@@ -214,7 +214,7 @@ describe('TaskCard mutation handlers', () => {
       });
 
       expect(mockPauseTask).toHaveBeenCalledWith('active-1');
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
       expect(window.alert).not.toHaveBeenCalled();
     });
 
@@ -252,7 +252,7 @@ describe('TaskCard mutation handlers', () => {
       );
     }
 
-    it('calls resumeTask and refreshes router on success', async () => {
+    it('calls resumeTask and does not refresh router on success', async () => {
       mockResumeTask.mockResolvedValue({ success: true, error: '' });
       renderPausedTask();
 
@@ -262,7 +262,7 @@ describe('TaskCard mutation handlers', () => {
       });
 
       expect(mockResumeTask).toHaveBeenCalledWith('paused-1');
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
       expect(window.alert).not.toHaveBeenCalled();
     });
 
@@ -310,7 +310,7 @@ describe('TaskCard mutation handlers', () => {
       );
     }
 
-    it('calls stopTask and refreshes router on success', async () => {
+    it('calls stopTask and does not refresh router on success', async () => {
       mockStopTask.mockImplementation(backgroundStub({ ok: true }));
       renderActiveTask();
 
@@ -320,7 +320,7 @@ describe('TaskCard mutation handlers', () => {
       });
 
       expect(mockStopTask).toHaveBeenCalledWith('active-1', expect.any(String));
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
       expect(window.alert).not.toHaveBeenCalled();
     });
 
@@ -413,7 +413,7 @@ describe('TaskCard mutation handlers', () => {
       );
     }
 
-    it('calls playTask and refreshes router on success', async () => {
+    it('calls playTask and does not refresh router on success', async () => {
       mockPlayTask.mockResolvedValue({ success: true, error: '' });
       renderBacklogTask();
 
@@ -422,7 +422,7 @@ describe('TaskCard mutation handlers', () => {
       });
 
       expect(mockPlayTask).toHaveBeenCalledWith('backlog-1');
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
       expect(window.alert).not.toHaveBeenCalled();
     });
 
@@ -474,7 +474,7 @@ describe('TaskCard mutation handlers', () => {
       }, { timeout: 10_000 });
     });
 
-    it('calls deleteTaskWorktree and refreshes router on success', async () => {
+    it('calls deleteTaskWorktree and does not refresh router on success', async () => {
       renderWithWorktree();
 
       await waitFor(() => {
@@ -488,7 +488,7 @@ describe('TaskCard mutation handlers', () => {
       expect(window.confirm).toHaveBeenCalled();
       expect(mockDeleteWorktree).toHaveBeenCalledWith('wt-1', expect.any(String));
       await waitFor(() => expect(screen.queryByTitle(/Delete worktree/)).not.toBeInTheDocument());
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
       expect(window.alert).not.toHaveBeenCalled();
     });
 

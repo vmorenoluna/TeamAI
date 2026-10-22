@@ -80,7 +80,7 @@ describe('useServerMutation', () => {
   // ── run() ───────────────────────────────────────────────────────────
 
   describe('run()', () => {
-    it('calls the action and refreshes the router on success', async () => {
+    it('calls the action and does NOT refresh the router on success', async () => {
       const action = vi.fn().mockResolvedValue(undefined);
       const { result } = renderHook(() => useServerMutation());
 
@@ -89,7 +89,7 @@ describe('useServerMutation', () => {
       });
 
       expect(action).toHaveBeenCalledOnce();
-      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
     it('isPending resets to false after execution completes', async () => {
@@ -105,7 +105,7 @@ describe('useServerMutation', () => {
       });
 
       expect(action).toHaveBeenCalledOnce();
-      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
       expect(result.current.isPending).toBe(false);
     });
 
@@ -123,7 +123,7 @@ describe('useServerMutation', () => {
 
       expect(action1).toHaveBeenCalledOnce();
       expect(action2).toHaveBeenCalledOnce();
-      expect(mockRouterRefresh).toHaveBeenCalledTimes(2);
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
   });
 
@@ -169,7 +169,7 @@ describe('useServerMutation', () => {
   // ── mutate() ────────────────────────────────────────────────────────
 
   describe('mutate()', () => {
-    it('calls the action with args and refreshes the router on success', async () => {
+    it('calls the action with args and does NOT refresh the router on success', async () => {
       const action = vi.fn().mockResolvedValue(undefined);
       const { result } = renderHook(() => useServerMutation());
 
@@ -178,7 +178,7 @@ describe('useServerMutation', () => {
       });
 
       expect(action).toHaveBeenCalledWith('arg1', 42);
-      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
     it('works with no extra args', async () => {
@@ -190,7 +190,7 @@ describe('useServerMutation', () => {
       });
 
       expect(action).toHaveBeenCalledWith();
-      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
     it('works with complex arg types', async () => {
@@ -203,7 +203,7 @@ describe('useServerMutation', () => {
       });
 
       expect(action).toHaveBeenCalledWith('str', true, obj);
-      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
   });
 
@@ -245,7 +245,7 @@ describe('useServerMutation', () => {
         result.current.mutate(action, 1, 'two');
       });
       expect(action).toHaveBeenCalledWith(1, 'two');
-      expect(mockRouterRefresh).toHaveBeenCalledTimes(1);
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
 
       vi.clearAllMocks();
 
@@ -253,7 +253,7 @@ describe('useServerMutation', () => {
         result.current.run(() => action(1, 'two'));
       });
       expect(action).toHaveBeenCalledWith(1, 'two');
-      expect(mockRouterRefresh).toHaveBeenCalledTimes(1);
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
   });
 

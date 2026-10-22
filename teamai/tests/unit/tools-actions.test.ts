@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/tool-checker', () => mocks);
 
+const mockRevalidatePath = vi.hoisted(() => vi.fn());
+vi.mock('next/cache', () => ({ revalidatePath: mockRevalidatePath }));
+
 import { checkTools, updateToolPath, resetToolPath } from '@/app/actions/tools';
 
 describe('tools actions', () => {
@@ -30,6 +33,7 @@ describe('tools actions', () => {
   it('updateToolPath resolves to a ToolStatus, not a promise', async () => {
     const result = await updateToolPath('gh', '/x/gh');
     expect(mocks.setToolPath).toHaveBeenCalledWith('gh', '/x/gh');
+    expect(mockRevalidatePath).toHaveBeenCalledWith('/', 'layout');
     expect(result).toMatchObject({ name: 'gh', customPath: true });
     expect(typeof (result as unknown as { then?: unknown }).then).toBe('undefined');
   });
@@ -38,6 +42,7 @@ describe('tools actions', () => {
     mocks.checkTool.mockImplementation(async (name: string) => status(name));
     const result = await resetToolPath('git');
     expect(mocks.clearToolPath).toHaveBeenCalledWith('git');
+    expect(mockRevalidatePath).toHaveBeenCalledWith('/', 'layout');
     expect(result).toMatchObject({ name: 'git', customPath: false });
   });
 

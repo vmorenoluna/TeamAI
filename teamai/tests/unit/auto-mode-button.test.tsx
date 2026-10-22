@@ -189,7 +189,7 @@ describe('AutoModeButton', () => {
       });
     });
 
-    it('refreshes the router after successful toggle', async () => {
+    it('does not refresh the router after successful toggle', async () => {
       mockToggleAutoMode.mockResolvedValue(undefined);
       mockRouterRefresh.mockClear();
 
@@ -198,8 +198,9 @@ describe('AutoModeButton', () => {
       fireEvent.click(screen.getByRole('button'));
 
       await waitFor(() => {
-        expect(mockRouterRefresh).toHaveBeenCalledTimes(1);
+        expect(mockToggleAutoMode).toHaveBeenCalled();
       });
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
   });
 
