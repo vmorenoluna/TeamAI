@@ -21,12 +21,14 @@ const mockCreateTask = vi.hoisted(() => vi.fn());
 const mockMoveTask = vi.hoisted(() => vi.fn());
 const mockBulkDeleteTasks = vi.hoisted(() => vi.fn());
 const mockRetryTaskWithOptions = vi.hoisted(() => vi.fn());
+const mockGetTasks = vi.hoisted(() => vi.fn());
 
 vi.mock('@/app/actions/tasks', () => ({
   createTask: (...args: unknown[]) => mockCreateTask(...args),
   moveTask: (...args: unknown[]) => mockMoveTask(...args),
   bulkDeleteTasks: (...args: unknown[]) => mockBulkDeleteTasks(...args),
   retryTaskWithOptions: (...args: unknown[]) => mockRetryTaskWithOptions(...args),
+  getTasks: (...args: unknown[]) => mockGetTasks(...args),
 }));
 
 vi.mock('@/hooks/use-phase-sync', () => ({
@@ -831,7 +833,7 @@ describe('KanbanBoard', () => {
 
     // ── Regression: confirming phase-change event shouldn't flicker ─────
     // The real 'phase-change' WebSocket event confirming the move arrives
-    // well before the debounced router.refresh() that would deliver fresh
+    // well before the debounced re-sync that would deliver fresh
     // `task.phase` data. The old code cleared the optimistic override
     // immediately on that event, so the card fell through to the still-stale
     // `task.phase` prop for the rest of the debounce window — visibly
@@ -1114,6 +1116,65 @@ describe('KanbanBoard', () => {
       // Re-checks for new pages on each scroll-to-bottom, even when the
       // current hasMore state says there are none.
       expect(mockLoadMoreDoneHistory).toHaveBeenCalledWith(1);
+    });
+  });
+  // ── Re-sync via getTasks (replaces router.refresh) ───────────────────
+
+  describe('onResync re-fetch', () => {
+    function latestResync() {
+      return vi.mocked(usePhaseSync).mock.calls.at(-1)![0]!.onResync!;
+    }
+
+    it('AC11: re-fetches tasks on resync (ids and null) and renders the result', async () => {
+      mockGetTasks.mockResolvedValue([task({ id: 'n1', title: 'Fresh Task', phase: 'implement' })]);
+      renderBoard([task({ id: 'o1', title: 'Old Task' })]);
+
+      await act(async () => { latestResync()(['o1']); });
+      await waitFor(() => expect(screen.getByText('Fresh Task')).toBeInTheDocument());
+      expect(screen.queryByText('Old Task')).not.toBeInTheDocument();
+
+      mockGetTasks.mockResolvedValue([task({ id: 'n2', title: 'After Reconnect' })]);
+      await act(async () => { latestResync()(null); });
+      await waitFor(() => expect(screen.getByText('After Reconnect')).toBeInTheDocument());
+      expect(mockGetTasks).toHaveBeenCalledTimes(2);
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('AC12: discards a stale response that resolves after a newer one', async () => {
+      let resolveFirst!: (v: Task[]) => void;
+      mockGetTasks
+        .mockImplementationOnce(() => new Promise<Task[]>(r => { resolveFirst = r; }))
+        .mockResolvedValueOnce([task({ id: 'b', title: 'Newer' })]);
+      renderBoard([]);
+
+      await act(async () => { latestResync()(['a']); });
+      await act(async () => { latestResync()(['b']); });
+      await waitFor(() => expect(screen.getByText('Newer')).toBeInTheDocument());
+
+      await act(async () => { resolveFirst([task({ id: 'a', title: 'Stale' })]); });
+      expect(screen.queryByText('Stale')).not.toBeInTheDocument();
+      expect(screen.getByText('Newer')).toBeInTheDocument();
+    });
+
+    it('AC13: on rejection keeps state, warns, and calls router.refresh once', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const err = new Error('boom');
+      mockGetTasks.mockRejectedValue(err);
+      renderBoard([task({ id: 'o1', title: 'Old Task' })]);
+
+      await act(async () => { latestResync()(['o1']); });
+      await waitFor(() => expect(mockRouterRefresh).toHaveBeenCalledTimes(1));
+      expect(warn).toHaveBeenCalledWith('[kanban-board] re-sync failed:', err);
+      expect(screen.getByText('Old Task')).toBeInTheDocument();
+      warn.mockRestore();
+    });
+
+    it('resets local tasks when the tasks prop changes', () => {
+      const { rerender } = render(<KanbanBoard tasks={[task({ title: 'A' })]} projectPath="/test" />);
+      expect(screen.getByText('A')).toBeInTheDocument();
+      rerender(<KanbanBoard tasks={[task({ id: 'x', title: 'B' })]} projectPath="/test" />);
+      expect(screen.getByText('B')).toBeInTheDocument();
+      expect(screen.queryByText('A')).not.toBeInTheDocument();
     });
   });
 });
