@@ -40,6 +40,17 @@ vi.mock('node-pty', () => ({
   spawn: vi.fn(),
 }));
 
+// The actions reach the ProcessManager through the engine; run the engine's
+// session handlers in-process against the real ProcessManager singleton.
+vi.mock('@/engine/engine-client', () => ({
+  engineCall: async (method: string, args: unknown[] = []) => {
+    const { sessionsHandlers } = await import('@/engine/handlers/sessions');
+    const handler = sessionsHandlers[method];
+    if (!handler) throw new Error(`unexpected engine method ${method}`);
+    return handler(args[0]);
+  },
+}));
+
 vi.mock('../../src/lib/container-manager', () => ({
   readContainerConfig: vi.fn(() => ({ enabled: false })),
   readContainerRemoteUser: vi.fn(() => 'node'),
@@ -115,11 +126,13 @@ function getPm(): any {
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('Cancel Insights Session Integration', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     // Delete previous singleton so a fresh one is created when the module
     // is next imported (triggered by dynamic import of an action).
     delete (global as Record<string, unknown>).__processManager;
+    // Create the fresh singleton the engine session handlers will use.
+    await import('@/lib/process-manager');
     initProject();
     (global as Record<string, unknown>).__insightsSessions = new Map();
   });
