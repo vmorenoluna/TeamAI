@@ -13,19 +13,17 @@ import { join, resolve } from 'path';
 import { parse } from 'url';
 import next from 'next';
 import { WebSocketServer, WebSocket } from 'ws';
-import { processManager } from './src/lib/process-manager';
-import { appEvents } from './src/lib/app-events';
-import { containerManager, checkDockerAvailable } from './src/lib/container-manager';
-import { startupCleanup, autoResumeInterruptedTasks, sweepStalledTasks } from './src/lib/recovery';
-import { restoreAutoModeStates } from './src/lib/auto-mode';
-import { startRoleRefinementWatcher } from './src/lib/role-refinement-watcher';
 import { error as logError } from './src/lib/logger';
 import { checkAllTools } from './src/lib/tool-checker';
 import { projectStore } from './src/lib/project-store';
-import { sweepAbandonedWorktreeRemnants } from './src/lib/orchestrator/worktree-ops';
 import { prewarmModelsCache } from './src/app/actions/providers';
 import { getBuildInfo } from './src/lib/build-info';
-import { buildActionResultMessage, type ActionResultEvent } from './src/lib/action-result-message';
+import { appEvents } from './src/lib/app-events';
+import { startEngine } from './src/engine/engine-host';
+import { attachWsRelay, handleClientMessage, type RelayClient } from './src/engine/ws-relay';
+
+// Mark this process as the API server before Next loads anything that reads the role.
+process.env.TEAMAI_PROCESS_ROLE = 'api';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
 const handle = app.getRequestHandler();
@@ -45,129 +43,15 @@ void app.prepare().then(async () => {
     projectRoot?: string;
   }
 
-  /** Helper: only send to clients that match the event's project, or have no project set (backwards compat). */
-  function broadcastToProject(event: { projectRoot?: string }, msg: string): void {
-    const eventProject = typeof event.projectRoot === 'string' ? event.projectRoot : undefined;
-    for (const client of wss.clients) {
-      const pws = client as ProjectWebSocket;
-      if (pws.readyState !== WebSocket.OPEN) continue;
-      // Send if no project filter on client (backwards compat), or client's project matches event
-      if (!pws.projectRoot || !eventProject || pws.projectRoot === eventProject) {
-        pws.send(msg);
-      }
-    }
-  }
+  // Engine events (re-emitted on appEvents by the engine host) -> browser messages
+  attachWsRelay(appEvents, () => wss.clients as Set<ProjectWebSocket> as Iterable<RelayClient>);
 
+  // Browser -> engine: terminal input / resize, plus replay when a terminal
+  // panel reconnects after route navigation.
   wss.on('connection', (ws) => {
-    // Agent event streaming — filtered to the client's project
-    const agentHandler = ({ sessionId, event }: { sessionId: string; event: Record<string, unknown> }) => {
-      const session = processManager.getSession(sessionId);
-      if (!session) return;
-      const taskId = session.taskId;
-      const pws = ws as ProjectWebSocket;
-      // Filter: only send if the client has no project filter (backwards compat)
-      // or the session's projectRoot matches the client's project
-      if (pws.projectRoot && session.projectRoot && session.projectRoot !== pws.projectRoot) return;
-      ws.send(JSON.stringify({ sessionId, taskId, event }));
-    };
-    processManager.on('event', agentHandler);
-    processManager.on('error', agentHandler);
-
-    // PTY terminal data streaming
-    const terminalHandler = ({ sessionId, data }: { sessionId: string; data: string }) => {
-      ws.send(JSON.stringify({ type: 'terminal', sessionId, data }));
-    };
-    processManager.on('terminal-data', terminalHandler);
-
-    // Messages from browser → PTY input / resize, plus replay when a terminal
-    // panel reconnects after route navigation. The PTY remains alive while
-    // the page is unmounted, so replay the buffered conversation before new
-    // output is streamed to the returning panel.
     ws.on('message', (msg: Buffer) => {
-      try {
-        const parsed = JSON.parse(msg.toString());
-        if (parsed.type === 'terminal-attach') {
-          const output = processManager.getTerminalOutput(parsed.sessionId);
-          if (output && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'terminal', sessionId: parsed.sessionId, data: output }));
-          }
-        } else if (parsed.type === 'terminal-input') {
-          processManager.writeToTerminal(parsed.sessionId, parsed.data);
-        } else if (parsed.type === 'terminal-resize') {
-          processManager.resizeTerminal(parsed.sessionId, parsed.cols, parsed.rows);
-        }
-      } catch (err) { logError('ws', 'Failed to parse client message', err); }
+      void handleClientMessage(ws as RelayClient, msg.toString());
     });
-
-    ws.on('close', () => {
-      processManager.off('event', agentHandler);
-      processManager.off('error', agentHandler);
-      processManager.off('terminal-data', terminalHandler);
-    });
-  });
-
-  // Broadcast phase-change events from the Orchestrator to clients viewing the relevant project
-  processManager.on('phase-change', (data: { taskId: string; phase: string; projectRoot?: string; prUrl?: string; platform?: string }) => {
-    const msg = JSON.stringify({ type: 'phase-change', taskId: data.taskId, phase: data.phase, prUrl: data.prUrl, platform: data.platform });
-    broadcastToProject(data, msg);
-  });
-
-  // Deliver the outcome of a server action that returned before its work finished
-  processManager.on('action-result', (data: ActionResultEvent) => {
-    broadcastToProject(data, buildActionResultMessage(data));
-  });
-
-  // Broadcast role-refinement events so open task panels / the /task page
-  // refresh when a failure analysis completes.
-  processManager.on('refinement-update', (data: { taskId: string; projectRoot?: string }) => {
-    const msg = JSON.stringify({ type: 'refinement-update', taskId: data.taskId });
-    broadcastToProject(data, msg);
-  });
-
-  // Broadcast generic task mutations from TaskStore (title/description edits,
-  // dependency changes, artifact clearing, human-feedback routing, pause
-  // state, etc.) so every UI surface refreshes on any orchestrator-driven
-  // state change — not only the phase transitions that happen when an agent
-  // session starts. Carries no data beyond the taskId; consumers just re-fetch.
-  appEvents.on('task-updated', (data: { taskId: string; projectRoot?: string }) => {
-    const msg = JSON.stringify({ type: 'task-updated', taskId: data.taskId });
-    broadcastToProject(data, msg);
-  });
-
-  // Broadcast subtask-progress events so the kanban counter updates live during implement
-  processManager.on('subtask-progress', (data: { taskId: string; completed: number; total: number; projectRoot?: string }) => {
-    const msg = JSON.stringify({ type: 'subtask-progress', taskId: data.taskId, completed: data.completed, total: data.total });
-    broadcastToProject(data, msg);
-  });
-
-  // Broadcast container lifecycle state changes to clients viewing the relevant project
-  containerManager.on('container-state', (data: { projectRoot: string; state: string }) => {
-    const msg = JSON.stringify({ type: 'container-state', projectRoot: data.projectRoot, state: data.state });
-    broadcastToProject(data, msg);
-  });
-
-  // Broadcast container startup log messages to clients viewing the relevant project
-  containerManager.on('container-log', (data: { projectRoot: string; message: string }) => {
-    const msg = JSON.stringify({ type: 'container-log', projectRoot: data.projectRoot, message: data.message });
-    broadcastToProject(data, msg);
-  });
-
-  // Broadcast container validation step updates
-  containerManager.on('container-validation', (data: { projectRoot: string; step: unknown }) => {
-    const msg = JSON.stringify({ type: 'container-validation', projectRoot: data.projectRoot, step: data.step });
-    broadcastToProject(data, msg);
-  });
-
-  // Broadcast container-docker-missing events so the UI can show a warning dialog
-  processManager.on('container-docker-missing', (data: { projectRoot: string }) => {
-    const msg = JSON.stringify({ type: 'container-docker-missing', projectRoot: data.projectRoot });
-    broadcastToProject(data, msg);
-  });
-
-  // Broadcast container-validation-failed so the UI can show why work is blocked
-  processManager.on('container-validation-failed', (data: { projectRoot: string; message: string }) => {
-    const msg = JSON.stringify({ type: 'container-validation-failed', projectRoot: data.projectRoot, message: data.message });
-    broadcastToProject(data, msg);
   });
 
   server.on('upgrade', (request, socket, head) => {
@@ -243,7 +127,7 @@ void app.prepare().then(async () => {
   // this, a force-killed server can leave the socket in a zombie state that
   // blocks the next test run from binding to port 3001.
   let shuttingDown = false;
-  function shutdown(signal: string) {
+  async function shutdown(signal: string) {
     if (shuttingDown) return;  // ignore duplicate signals (e.g. double Ctrl+C)
     shuttingDown = true;
     console.log(`[server] Received ${signal} — shutting down gracefully…`);
@@ -252,6 +136,11 @@ void app.prepare().then(async () => {
 
     // Stop accepting new connections, then close existing ones
     wss.close();
+    try {
+      await engineHost.shutdown();
+    } catch (err) {
+      logError('server', 'Engine shutdown failed', err);
+    }
     server.close(() => {
       console.log('[server] HTTP server closed');
       process.exit(0);
@@ -265,16 +154,17 @@ void app.prepare().then(async () => {
     }, 5_000).unref();
   }
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 
   // Windows: taskkill sends a console CTRL event that Node.js surfaces as
   // SIGBREAK on some Windows shells.  Not all Windows terminals support it,
   // but it's the best shot at catching Playwright's process termination.
-  process.on('SIGBREAK', () => shutdown('SIGBREAK'));
+  process.on('SIGBREAK', () => void shutdown('SIGBREAK'));
 
-  // Warm the Docker availability cache so the first sync readContainerConfig() sees the real value
-  await checkDockerAvailable();
+  // Start the pipeline engine (orchestrator, auto mode, process manager) in its own child process
+  const engineHost = startEngine();
+  globalThis.__teamaiEngine = engineHost;
 
   // Compute the build version/SHA once so the root layout never spawns git per render
   getBuildInfo();
@@ -347,156 +237,6 @@ void app.prepare().then(async () => {
     } else if (!WITH_DEMO && existingDemo) {
       projectStore.remove(DEMO_PATH);
       console.log('[demo] Demo project removed (production mode)');
-    }
-
-    // ── Force-sync default commands at startup ──────────────────────────
-    // Commands are the pipeline's orchestration contract and must match the
-    // shipped defaults before any session runs (auto-resume below can spawn
-    // sessions immediately). Customized commands are overwritten — TeamAI
-    // owns the commands; only roles are user-owned and never auto-synced.
-    try {
-      const syncReport = projectStore.syncAllProjectsDefaults();
-      if (syncReport.projects.length > 0) {
-        console.log(`[defaults] Auto-synced default commands for ${syncReport.projects.length} project(s):`);
-        for (const p of syncReport.projects) {
-          console.log(`  • ${p.projectName}: ${p.updatedFiles.length} file(s) — ${p.updatedFiles.slice(0, 3).join(', ')}${p.updatedFiles.length > 3 ? ', …' : ''}`);
-        }
-      } else {
-        console.log('[defaults] All projects already up to date');
-      }
-    } catch (err) {
-      logError('defaults', 'Failed to auto-sync default commands at startup', err);
-    }
-
-    // ── Startup crash recovery scan ─────────────────────────────────────
-    const staleSessions = processManager.getStaleSessions();
-    const report = startupCleanup(staleSessions.length);
-
-    const parts: string[] = [];
-    if (report.restoredWorktrees > 0) {
-      parts.push(`${report.restoredWorktrees} worktree(s) restored from container-patched state`);
-    }
-    if (report.interruptedTasks.length > 0) {
-      parts.push(`${report.interruptedTasks.length} interrupted task(s)`);
-    }
-    if (report.staleSessions > 0) {
-      parts.push(`${report.staleSessions} stale session(s)`);
-    }
-    if (report.orphanedWorktrees.length > 0) {
-      parts.push(`${report.orphanedWorktrees.length} orphaned worktree(s)`);
-    }
-    if (report.autoClearedRateLimits > 0) {
-      parts.push(`${report.autoClearedRateLimits} expired rate limit(s) auto-cleared`);
-    }
-    if (report.artifactInconsistencies.length > 0) {
-      parts.push(`${report.artifactInconsistencies.length} artifact inconsistency(s)`);
-    }
-
-    if (parts.length > 0) {
-      console.log(`[recovery] ${parts.join(', ')} detected:`);
-      for (const t of report.interruptedTasks) {
-        console.log(`  • interrupted: ${t.title} (${t.phase}) in ${t.projectName}`);
-      }
-      for (const s of staleSessions) {
-        console.log(`  • stale session: ${s.id.substring(0, 8)}… task=${s.taskId} role=${s.role}`);
-        processManager.removeStaleSession(s.id);
-      }
-      for (const w of report.orphanedWorktrees) {
-        console.log(`  • orphaned worktree: ${w.path}`);
-      }
-      for (const a of report.artifactInconsistencies) {
-        console.log(`  • artifact inconsistency: ${a.title} (${a.phase}) in ${a.projectName} — ${a.issue}`);
-      }
-    } else {
-      console.log('[recovery] clean — no stale state detected');
-    }
-
-    // ── Auto-resume interrupted tasks on startup ────────────────────────
-    if (report.interruptedTasks.length > 0) {
-      autoResumeInterruptedTasks().then(count => {
-        console.log(`[auto-resume] Queued ${count} interrupted task(s) for resumption`);
-      }).catch(err => {
-        logError('auto-resume', 'Failed to auto-resume interrupted tasks', err);
-      });
-    }
-
-    // ── Reclaim worktree directories abandoned while locked ─────────────
-    // A subtask worktree path held open by a scanner or orphaned process is
-    // never waited on or renamed: the run takes a fresh path instead and
-    // leaves the old directory behind. By the time we are starting up the
-    // lock has usually gone, so this is where those leftovers are deleted.
-    try {
-      for (const project of projectStore.getAll()) {
-        sweepAbandonedWorktreeRemnants(project.path).then(removed => {
-          if (removed.length > 0) {
-            console.log(`[worktree-sweep] Removed ${removed.length} abandoned worktree remnant(s) in ${project.path}`);
-          }
-        }).catch(err => {
-          logError('worktree-sweep', 'Failed to sweep abandoned worktree remnants', err);
-        });
-      }
-    } catch (err) {
-      logError('worktree-sweep', 'Failed to sweep abandoned worktree remnants', err);
-    }
-
-    // ── Restore auto-mode state from disk (Bug 1) ──────────────────────
-    // Auto-mode state is persisted to .teamai/auto-mode.json so it survives
-    // server restarts (dev hot reload, crash, manual restart). Without this,
-    // a rate-limit pause that spans a restart would silently disable auto mode.
-    try {
-      const restored = restoreAutoModeStates();
-      if (restored > 0) {
-        console.log(`[auto-mode] Restored auto mode for ${restored} project(s) from disk`);
-      }
-    } catch (err) {
-      logError('auto-mode', 'Failed to restore auto-mode states from disk', err);
-    }
-
-    // ── Role Refinement watcher (Phase 2) ─────────────────────────────
-    // Independent of auto-mode: when a project is in 'auto' mode it listens
-    // for failed tasks and auto-triggers a failure analysis on recurrence
-    // (still human-approved to apply). Fires on live phase-change events
-    // only — no boot-time adoption of already-failed tasks.
-    try {
-      startRoleRefinementWatcher();
-      console.log('[role-refinement] Watcher started (auto-analysis on recurrence)');
-    } catch (err) {
-      logError('role-refinement', 'Failed to start role-refinement watcher', err);
-    }
-
-    // ── Periodic stall-detection sweep ──────────────────────────────────
-    // Every 5 minutes, scan all projects for tasks stuck in active phases
-    // (expired rate-limit windows, silent session exits, etc.) and re-queue them.
-    // sweepStalledTasks() is the SOLE owner of session stall-kills — do not add
-    // another inline kill loop here. It must stay the only place that decides a
-    // session has stalled because: (1) it reads each project's configured
-    // per-project idle/tool-stall thresholds, so a second hardcoded timeout here
-    // would silently override those settings; (2) it passes the 'stalled' reason
-    // to killSession, which gates the stall-recovery retry classification in
-    // implement.ts — a kill from any other call site breaks that classification.
-    const SWEEP_INTERVAL_MS = 5 * 60_000; // 5 minutes
-    setInterval(() => {
-      sweepStalledTasks().then(count => {
-        if (count > 0) {
-          console.log(`[sweep] Re-queued ${count} stalled task(s)`);
-        }
-      }).catch(err => {
-        logError('sweep', 'Periodic stall-detection sweep failed', err);
-      });
-    }, SWEEP_INTERVAL_MS);
-  });
-
-  // ── Container availability listener: auto-resume when container becomes available ──
-  containerManager.on('container-state', (data: { projectRoot: string; state: string }) => {
-    if (data.state === 'running') {
-      console.log(`[auto-resume] Container for ${data.projectRoot} became available — checking for interrupted tasks`);
-      autoResumeInterruptedTasks().then(count => {
-        if (count > 0) {
-          console.log(`[auto-resume] Queued ${count} interrupted task(s) after container became available`);
-        }
-      }).catch(err => {
-        logError('auto-resume', 'Failed to auto-resume after container became available', err);
-      });
     }
   });
 });
