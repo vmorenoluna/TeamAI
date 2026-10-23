@@ -1,6 +1,6 @@
 'use server';
 
-import { processManager, containerSessionOpts } from '@/lib/process-manager';
+import { engineCall } from '@/engine/engine-client';
 import { getActiveProjectPath } from './projects';
 import { getProvidersConfig } from './providers';
 import { readdirSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
@@ -81,16 +81,16 @@ export async function startRoadmapGeneration(skipCompetitors: boolean = false): 
   // Default to Sonnet (not the CLI default) so roadmap generation never
   // silently runs an expensive model.
   const explorationModel = providersConfig.exploration?.model || providersConfig.default.model;
-  const sessionId = await processManager.createSession({
+  const sessionId = await engineCall<string>('sessions.create', [{
+    projectPath,
     taskId: `roadmap::${projectPath}`,
     role: 'general',
     cwd: projectPath,
     model: explorationModel,
-    ...containerSessionOpts(projectPath),
-  });
+  }]);
   const key = `roadmap::${projectPath}`;
   sessions.set(key, sessionId);
-  processManager.sendMessage(sessionId, cmd);
+  await engineCall('sessions.send', [{ sessionId, message: cmd }]);
   return sessionId;
 }
 
@@ -252,13 +252,22 @@ export async function getLatestChangelog(filename: string): Promise<string> {
 
 // ── Active session lookup (for reconnect on page mount) ──────────────────────
 
+/** Liveness probe: any engine error (down, timeout) means 'not running'. */
+async function isSessionRunning(sessionId: string): Promise<boolean> {
+  try {
+    const session = await engineCall<{ status: string } | null>('sessions.get', [{ sessionId }], { timeoutMs: 5000 });
+    return !!(session && session.status === 'running');
+  } catch {
+    return false;
+  }
+}
+
 export async function getActiveRoadmapSession(type: 'roadmap' | 'changelog'): Promise<string | null> {
   const projectPath = await getActiveProjectPath();
   const key = `${type}::${projectPath}`;
   const sessionId = sessions.get(key);
   if (!sessionId) return null;
-  const session = processManager.getSession(sessionId);
-  if (session && session.status === 'running') return sessionId;
+  if (await isSessionRunning(sessionId)) return sessionId;
   // Session is gone — clean up the stale entry
   sessions.delete(key);
   return null;
@@ -266,8 +275,7 @@ export async function getActiveRoadmapSession(type: 'roadmap' | 'changelog'): Pr
 
 /** Verify a stored session ID is still valid (running on the server). */
 export async function isRoadmapSessionAlive(sessionId: string): Promise<boolean> {
-  const session = processManager.getSession(sessionId);
-  return !!(session && session.status === 'running');
+  return isSessionRunning(sessionId);
 }
 
 /** Cancel a running roadmap or changelog generation. */
@@ -276,7 +284,7 @@ export async function cancelRoadmapGeneration(type: 'roadmap' | 'changelog'): Pr
   const key = `${type}::${projectPath}`;
   const sessionId = sessions.get(key);
   if (sessionId) {
-    processManager.killSession(sessionId);
+    await engineCall('sessions.kill', [{ sessionId }]);
     sessions.delete(key);
   }
 }
@@ -317,9 +325,11 @@ export async function convertToTask(
   }
 
   // Create a task in the kanban board
-  const taskStore = new TaskStore(projectPath);
   const taskId = randomUUID();
-  taskStore.create(taskId, item.title, item.description, item.source, item.competitive_context);
+  await engineCall('tasks.createTasks', [{
+    projectPath,
+    tasks: [{ id: taskId, title: item.title, description: item.description, source: item.source, competitive_context: item.competitive_context }],
+  }]);
 
   // Write linkedTaskId back to the roadmap JSON
   item.linkedTaskId = taskId;
@@ -354,7 +364,7 @@ export async function convertMultipleToTasks(
     throw new Error(`Cannot read roadmap file: ${filename}`);
   }
 
-  const taskStore = new TaskStore(projectPath);
+  const newTasks: { id: string; title: string; description: string; source?: string; competitive_context?: string }[] = [];
   const taskIds: string[] = [];
   let converted = 0;
   let skipped = 0;
@@ -373,13 +383,16 @@ export async function convertMultipleToTasks(
     }
 
     const taskId = randomUUID();
-    taskStore.create(taskId, item.title, item.description, item.source, item.competitive_context);
+    newTasks.push({ id: taskId, title: item.title, description: item.description, source: item.source, competitive_context: item.competitive_context });
     item.linkedTaskId = taskId;
     taskIds.push(taskId);
     converted++;
     dirty = true;
   }
 
+  if (newTasks.length > 0) {
+    await engineCall('tasks.createTasks', [{ projectPath, tasks: newTasks }]);
+  }
   if (dirty) {
     writeFileSync(filePath, JSON.stringify(report, null, 2));
   }

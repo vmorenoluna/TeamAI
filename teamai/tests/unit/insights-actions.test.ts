@@ -11,19 +11,24 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
 
+const mockEngineOpts = vi.fn();
 const mockCreateSession = vi.fn();
 const mockSendMessage = vi.fn();
 const mockGetSession = vi.fn();
 const mockKillSession = vi.fn();
 
-vi.mock('@/lib/process-manager', () => ({
-  processManager: {
-    createSession: (...args: unknown[]) => mockCreateSession(...args),
-    sendMessage: (...args: unknown[]) => mockSendMessage(...args),
-    getSession: (...args: unknown[]) => mockGetSession(...args),
-    killSession: (...args: unknown[]) => mockKillSession(...args),
+vi.mock('@/engine/engine-client', () => ({
+  engineCall: async (method: string, args: unknown[] = [], opts?: { timeoutMs?: number }) => {
+    mockEngineOpts(method, opts);
+    const p = args[0] as any;
+    switch (method) {
+      case 'sessions.create': return mockCreateSession(p);
+      case 'sessions.send': return mockSendMessage(p.sessionId, p.message);
+      case 'sessions.kill': return mockKillSession(p.sessionId);
+      case 'sessions.get': return mockGetSession(p.sessionId);
+      default: throw new Error(`unexpected engine method ${method}`);
+    }
   },
-  containerSessionOpts: (projectRoot: string) => ({ projectRoot, permissionMode: 'bypassPermissions' as const }),
 }));
 
 const mockGetActiveProjectPath = vi.fn();
@@ -87,8 +92,7 @@ describe('insights server actions', () => {
         taskId: `insights::${root}`,
         role: 'general',
         cwd: root,
-        projectRoot: root,
-        permissionMode: 'bypassPermissions',
+        projectPath: root,
       });
     });
 
@@ -208,7 +212,7 @@ describe('insights server actions', () => {
   // ── sendInsightsMessage ──────────────────────────────────────────────
 
   describe('sendInsightsMessage', () => {
-    it('calls processManager.sendMessage with the session ID and message', async () => {
+    it('calls sessions.send with the session ID and message', async () => {
       const { sendInsightsMessage } = await import('@/app/actions/insights');
 
       await sendInsightsMessage('session-abc', 'What is this codebase?');

@@ -1,6 +1,6 @@
 'use server';
 
-import { processManager, containerSessionOpts } from '@/lib/process-manager';
+import { engineCall } from '@/engine/engine-client';
 import { getActiveProjectPath } from './projects';
 import { getProvidersConfig } from './providers';
 import { renderCommand } from '@/lib/command-templates';
@@ -22,15 +22,15 @@ export async function startIdeationScan(): Promise<string> {
   const explorationModel = providersConfig.exploration?.model || providersConfig.default.model;
   // Render before createSession so a template failure spawns nothing.
   const message = renderCommand('ideation', '');
-  const sessionId = await processManager.createSession({
+  const sessionId = await engineCall<string>('sessions.create', [{
+    projectPath,
     taskId: `ideation::${projectPath}`,
     role: 'general',
     cwd: projectPath,
     model: explorationModel,
-    ...containerSessionOpts(projectPath),
-  });
+  }]);
   sessions.set(projectPath, sessionId);
-  processManager.sendMessage(sessionId, message);
+  await engineCall('sessions.send', [{ sessionId, message: message }]);
   return sessionId;
 }
 
@@ -49,7 +49,7 @@ export async function cancelIdeationScan(): Promise<void> {
   const projectPath = await getActiveProjectPath();
   const sessionId = sessions.get(projectPath);
   if (sessionId) {
-    processManager.killSession(sessionId);
+    await engineCall('sessions.kill', [{ sessionId }]);
     sessions.delete(projectPath);
   }
 }

@@ -27,6 +27,8 @@ vi.mock('@/app/actions/projects', () => ({
 }));
 
 // Mock processManager for tests that touch startRoadmapGeneration
+const mockKillSession = vi.fn();
+const mockEngineOpts = vi.fn();
 const mockCreateSession = vi.fn();
 const mockSendMessage = vi.fn();
 const mockGetSession = vi.fn();
@@ -47,24 +49,24 @@ vi.mock('next/cache', () => ({
   revalidatePath: vi.fn(),
 }));
 
-vi.mock('@/lib/process-manager', () => ({
-  processManager: {
-    createSession: (...args: unknown[]) => mockCreateSession(...args),
-    sendMessage: (...args: unknown[]) => mockSendMessage(...args),
-    getSession: (...args: unknown[]) => mockGetSession(...args),
-    on: vi.fn(),
-    off: vi.fn(),
-    emit: vi.fn(),
-    killSession: vi.fn(),
-    getAllSessions: vi.fn(() => []),
-    getStaleSessions: vi.fn(() => []),
-    removeStaleSession: vi.fn(),
-    getTerminalSessions: vi.fn(() => []),
-    killTerminalSession: vi.fn(),
-    writeToSession: vi.fn(),
-    terminateSession: vi.fn(),
+vi.mock('@/engine/engine-client', () => ({
+  engineCall: async (method: string, args: unknown[] = [], opts?: { timeoutMs?: number }) => {
+    mockEngineOpts(method, opts);
+    const p = args[0] as any;
+    switch (method) {
+      case 'sessions.create': return mockCreateSession(p);
+      case 'sessions.send': return mockSendMessage(p.sessionId, p.message);
+      case 'sessions.kill': return mockKillSession(p.sessionId);
+      case 'sessions.get': return mockGetSession(p.sessionId);
+      case 'tasks.createTasks': {
+        const { TaskStore } = await import('@/lib/task-store');
+        const store = new TaskStore(p.projectPath);
+        for (const t of p.tasks) store.create(t.id, t.title, t.description, t.source, t.competitive_context);
+        return { ids: p.tasks.map((t: { id: string }) => t.id) };
+      }
+      default: throw new Error(`unexpected engine method ${method}`);
+    }
   },
-  containerSessionOpts: (projectRoot: string) => ({ projectRoot, permissionMode: 'bypassPermissions' as const }),
 }));
 
 // ── Test Fixture Helpers ────────────────────────────────────────────────────
@@ -561,6 +563,23 @@ describe('Roadmap Integration', () => {
     });
   });
 
+  // ── isRoadmapSessionAlive ──────────────────────────────────────────
+
+  describe('isRoadmapSessionAlive', () => {
+    it('queries sessions.get with a 5000 ms timeout', async () => {
+      mockGetSession.mockReturnValue({ status: 'running' });
+      const { isRoadmapSessionAlive } = await import('@/app/actions/roadmap');
+      expect(await isRoadmapSessionAlive('sess-x')).toBe(true);
+      expect(mockEngineOpts).toHaveBeenCalledWith('sessions.get', { timeoutMs: 5000 });
+    });
+
+    it('reports not running when the engine errors', async () => {
+      mockGetSession.mockRejectedValue(new Error('Engine request timed out'));
+      const { isRoadmapSessionAlive } = await import('@/app/actions/roadmap');
+      expect(await isRoadmapSessionAlive('sess-x')).toBe(false);
+    });
+  });
+
   // ── getActiveRoadmapSession ────────────────────────────────────────
 
   describe('getActiveRoadmapSession', () => {
@@ -582,7 +601,7 @@ describe('Roadmap Integration', () => {
     });
   });
 
-  describe('startRoadmapGeneration (with mocked processManager)', () => {
+  describe('startRoadmapGeneration (with mocked engine client)', () => {
     it('creates a session and sends the rendered roadmap command', async () => {
       mockCreateSession.mockResolvedValue('sess-1');
       mkdirSync(join(projectDir, '.teamai', 'ideation'), { recursive: true });
@@ -592,7 +611,7 @@ describe('Roadmap Integration', () => {
       const sessionId = await startRoadmapGeneration(true); // skipCompetitors=true
 
       expect(mockCreateSession).toHaveBeenCalledWith(
-        expect.objectContaining({ projectRoot: projectDir, permissionMode: 'bypassPermissions' }),
+        expect.objectContaining({ projectPath: projectDir }),
       );
       expect(sessionId).toBe('sess-1');
       const expected = renderCommand('roadmap', '--skip-competitors --ideation-report .teamai/ideation/ideation-2026-01-01.json');
