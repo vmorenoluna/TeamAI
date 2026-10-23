@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { createTask, moveTask, bulkDeleteTasks, retryTaskWithOptions } from '@/app/actions/tasks';
+import { useRouter } from 'next/navigation';
+import { createTask, moveTask, bulkDeleteTasks, retryTaskWithOptions, getTasks } from '@/app/actions/tasks';
 import { loadMoreDoneHistory, rescanDoneHistory } from '@/app/actions/history';
 import { useServerMutation } from '@/hooks/use-server-mutation';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
@@ -125,8 +126,21 @@ function topoSortBacklog(tasks: Task[]): Task[] {
   return result;
 }
 
-export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryHasMore = false }: Props) {
+export function KanbanBoard({ tasks: tasksProp, projectPath, doneHistory = [], doneHistoryHasMore = false }: Props) {
   const { run, isPending } = useServerMutation();
+  const router = useRouter();
+  // Local copy of the task list: seeded from the prop, replaced by re-sync
+  // fetches. Reset when the prop identity changes (adjust-state-during-render).
+  const [tasks, setTasks] = useState<Task[]>(tasksProp);
+  const [prevTasksProp, setPrevTasksProp] = useState<Task[]>(tasksProp);
+  // Latest-wins guard: each getTasks() call and each prop change takes a new id.
+  const tasksReqIdRef = useRef(0);
+  if (prevTasksProp !== tasksProp) {
+    setPrevTasksProp(tasksProp);
+    setTasks(tasksProp);
+    // eslint-disable-next-line react-hooks/refs
+    tasksReqIdRef.current++;
+  }
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   // History tickets whose local folder was deleted — opened via the
   // read-only DoneHistoryModal (spec fetched on open, never preloaded).
@@ -183,8 +197,8 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
     });
     const t = optimisticTimeoutRef.current.get(taskId);
     if (t) { clearTimeout(t); optimisticTimeoutRef.current.delete(taskId); }
-    // Also clear the local subtask progress — the next router.refresh()
-    // triggered by the phase change will bring fresh server data.
+    // Also clear the local subtask progress — the re-sync triggered by the
+    // phase change will bring fresh server data.
     setLocalSubtaskProgress(prev => {
       const next = new Map(prev);
       next.delete(taskId);
@@ -194,7 +208,7 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
 
   // A real phase-change event for a task we're still showing optimistically
   // (drag-and-drop just moved it) arrives well before the debounced
-  // router.refresh() that would deliver fresh `task.phase` data — up to
+  // re-sync (onResync) that would deliver fresh `task.phase` data — up to
   // `refreshDebounceMs` later. Clearing the optimistic override immediately
   // on this event (the old behavior) left the card falling through to the
   // still-stale `task.phase` for that whole window, flickering back to its
@@ -215,9 +229,33 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
     });
   }, []);
 
+  // Fires with the changed task ids for phase-change events. A null argument
+  // means a WebSocket reconnect: usePhaseSync already called router.refresh(),
+  // which delivers fresh props (handled by the prop-reset above), so there is
+  // nothing to re-fetch here.
+  const onResync = useCallback((changedTaskIds: string[] | null) => {
+    if (changedTaskIds === null) return;
+    const reqId = ++tasksReqIdRef.current;
+    getTasks()
+      .then(fresh => {
+        if (reqId !== tasksReqIdRef.current) return;
+        setTasks(fresh);
+        setLocalSubtaskProgress(prev => {
+          const next = new Map(prev);
+          for (const t of fresh) next.delete(t.id);
+          return next;
+        });
+      })
+      .catch(err => {
+        console.warn('[kanban-board] re-sync failed:', err);
+        router.refresh();
+      });
+  }, [router]);
+
   usePhaseSync({
     project: projectPath,
     onPhaseChange: onRealtimePhaseChange,
+    onResync,
     onSubtaskProgress: (taskId, completed, total) => {
       setLocalSubtaskProgress(prev => {
         const next = new Map(prev);

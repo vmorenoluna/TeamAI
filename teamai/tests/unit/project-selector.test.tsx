@@ -154,7 +154,7 @@ describe('ProjectSelector — Add Project dialog', () => {
       expect(formData.get('path')).toBe('/home/user/new');
     });
 
-    it('closes the dialog and refreshes the router on success', async () => {
+    it('closes the dialog without refreshing the router on success', async () => {
       render(<ProjectSelector projects={projects} activeProjectPath={null} />);
 
       openAddDialog();
@@ -162,9 +162,9 @@ describe('ProjectSelector — Add Project dialog', () => {
       submitForm();
 
       await waitFor(() => {
-        expect(mockRouterRefresh).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole('heading', { name: 'Add Project' })).not.toBeInTheDocument();
       });
-      expect(screen.queryByRole('heading', { name: 'Add Project' })).not.toBeInTheDocument();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
   });
 

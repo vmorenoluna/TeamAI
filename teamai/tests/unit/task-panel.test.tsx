@@ -53,11 +53,19 @@ vi.mock('next/link', () => ({
 
 const gOnMessageCbs = vi.hoisted(() => [] as Array<(data: Record<string, unknown>) => void>);
 
+const gOnConnectionCbs = vi.hoisted(() => [] as Array<(connected: boolean) => void>);
+const mockUsePhaseSync = vi.hoisted(() => vi.fn());
+
 vi.mock('@/hooks/use-websocket', () => ({
-  useWebSocket: (opts?: { onMessage?: (data: Record<string, unknown>) => void }) => {
+  useWebSocket: (opts?: { onMessage?: (data: Record<string, unknown>) => void; onConnectionChange?: (connected: boolean) => void }) => {
     if (opts?.onMessage) gOnMessageCbs.push(opts.onMessage);
+    if (opts?.onConnectionChange) gOnConnectionCbs.push(opts.onConnectionChange);
     return { reconnect: vi.fn() };
   },
+}));
+
+vi.mock('@/hooks/use-phase-sync', () => ({
+  usePhaseSync: (...args: unknown[]) => mockUsePhaseSync(...args),
 }));
 
 // UnifiedTerminal mock (replaces SubtaskTerminalList for unified terminal with filter chips)
@@ -211,6 +219,7 @@ let closeCalls: number;
 beforeEach(() => {
   vi.clearAllMocks();
   gOnMessageCbs.length = 0;
+  gOnConnectionCbs.length = 0;
   closeCalls = 0;
   mockGetTaskFull.mockReset();
   mockGetTaskFull.mockResolvedValue(makeFullData());
@@ -532,6 +541,53 @@ describe('TaskPanel', () => {
 
   // ── onDataLoaded callback ────────────────────────────────────────────
 
+  describe('reconnect re-sync and embedded detail', () => {
+    // The latest registered callback belongs to the most recent render.
+    const fireConnection = (connected: boolean) => {
+      act(() => { gOnConnectionCbs[gOnConnectionCbs.length - 1]?.(connected); });
+    };
+
+    it('does not mount PhaseSyncer / call usePhaseSync when TaskDetail is embedded', async () => {
+      renderPanel({ cachedData: makeFullData({ task: { id: 'task-1' } }) });
+
+      await waitFor(() => {
+        expect(screen.getByText('Overview')).toBeInTheDocument();
+      }, { timeout: 10_000 });
+      expect(mockUsePhaseSync).not.toHaveBeenCalled();
+    });
+
+    it('first open triggers no extra getTaskFull; a reconnect re-fetches the same task once', async () => {
+      renderPanel();
+      await waitFor(() => {
+        expect(mockGetTaskFull).toHaveBeenCalledTimes(1);
+      }, { timeout: 10_000 });
+
+      fireConnection(true);
+      expect(mockGetTaskFull).toHaveBeenCalledTimes(1);
+
+      fireConnection(false);
+      expect(mockGetTaskFull).toHaveBeenCalledTimes(1);
+
+      fireConnection(true);
+      await waitFor(() => {
+        expect(mockGetTaskFull).toHaveBeenCalledTimes(2);
+      }, { timeout: 10_000 });
+      expect(mockGetTaskFull).toHaveBeenLastCalledWith('task-1');
+    });
+
+    it('does not re-fetch on reconnect when readonly', async () => {
+      renderPanel({ readonly: true });
+      await waitFor(() => {
+        expect(mockGetTaskFull).toHaveBeenCalledTimes(1);
+      }, { timeout: 10_000 });
+
+      fireConnection(true);
+      fireConnection(false);
+      fireConnection(true);
+      expect(mockGetTaskFull).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('onDataLoaded callback', () => {
     it('calls onDataLoaded after successful fetch', async () => {
       const data = makeFullData({ task: { id: 'task-1', title: 'Loaded' } });
@@ -766,6 +822,8 @@ describe('TaskDetail', () => {
     specPath: string;
     awaitingReviewReason: string | null;
     readonly: boolean;
+    embedded: boolean;
+    project: string;
     onClose: () => void;
   }> = {}) {
     const t = makeTask(overrides.task ?? {});
@@ -788,12 +846,27 @@ describe('TaskDetail', () => {
         specPath={overrides.specPath}
         awaitingReviewReason={overrides.awaitingReviewReason ?? null}
         readonly={overrides.readonly ?? false}
+        embedded={overrides.embedded}
+        project={overrides.project}
         onClose={overrides.onClose}
       />
     );
   }
 
   // ── Tab navigation ───────────────────────────────────────────────────
+
+  describe('phase sync', () => {
+    it('standalone with a project mounts PhaseSyncer and usePhaseSync receives the project', () => {
+      renderDetail({ project: '/p' });
+      expect(mockUsePhaseSync).toHaveBeenCalledWith({ project: '/p' });
+    });
+
+    it('does not sync when embedded or readonly', () => {
+      renderDetail({ project: '/p', embedded: true });
+      renderDetail({ project: '/p', readonly: true });
+      expect(mockUsePhaseSync).not.toHaveBeenCalled();
+    });
+  });
 
   describe('tab navigation', () => {
     it('renders all five tabs', () => {

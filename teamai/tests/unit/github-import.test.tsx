@@ -392,7 +392,7 @@ describe('GitHubImport', () => {
       });
     });
 
-    it('calls router.refresh after successful import', async () => {
+    it('does not call router.refresh after successful import', async () => {
       mockImportIssues.mockResolvedValue({ taskIds: ['task-1'] });
 
       await act(async () => {
@@ -404,8 +404,9 @@ describe('GitHubImport', () => {
       });
 
       await waitFor(() => {
-        expect(mockRouterRefresh).toHaveBeenCalled();
+        expect(mockImportIssues).toHaveBeenCalled();
       });
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
     it('shows error when import fails', async () => {

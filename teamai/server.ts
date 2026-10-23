@@ -23,6 +23,7 @@ import { checkAllTools } from './src/lib/tool-checker';
 import { projectStore } from './src/lib/project-store';
 import { sweepAbandonedWorktreeRemnants } from './src/lib/orchestrator/worktree-ops';
 import { prewarmModelsCache } from './src/app/actions/providers';
+import { getBuildInfo } from './src/lib/build-info';
 import { buildActionResultMessage, type ActionResultEvent } from './src/lib/action-result-message';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
@@ -273,6 +274,9 @@ void app.prepare().then(async () => {
 
   // Warm the Docker availability cache so the first sync readContainerConfig() sees the real value
   await checkDockerAvailable();
+
+  // Compute the build version/SHA once so the root layout never spawns git per render
+  getBuildInfo();
 
   server.listen(port, host, () => {
     console.log(`> Ready on http://${host}:${port}`);

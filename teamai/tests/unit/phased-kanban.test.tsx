@@ -279,7 +279,7 @@ describe('PhasedKanban', () => {
       expect(mockGetLinkedTaskStatuses).not.toHaveBeenCalled();
     });
 
-    it('re-fetches all linked statuses when a linked task phase changes', async () => {
+    it('re-fetches all linked statuses when onResync names a linked task', async () => {
       const report = makeReport();
       report.phases.now[0] = roadItem({
         ...report.phases.now[0],
@@ -297,26 +297,26 @@ describe('PhasedKanban', () => {
         expect(mockGetLinkedTaskStatuses).toHaveBeenCalledTimes(1);
       });
 
-      // Simulate a phase-change WebSocket event for the linked task
+      // Simulate a resync for the linked task
       const { usePhaseSync } = await import('@/hooks/use-phase-sync');
       const phaseSyncCalls = (usePhaseSync as unknown as ReturnType<typeof vi.fn>).mock.calls;
       const lastCall = phaseSyncCalls[phaseSyncCalls.length - 1];
-      const opts = lastCall?.[0] as { onPhaseChange?: (taskId: string, phase: string) => void } | undefined;
+      const opts = lastCall?.[0] as { onResync?: (ids: string[] | null) => void } | undefined;
 
       // Set up the next resolve before triggering
       mockGetLinkedTaskStatuses.mockResolvedValueOnce({
         'task-linked': { phase: 'implement', title: 'My Linked Task' },
       });
 
-      // Trigger the phase-change callback
+      // Trigger the resync callback
       await act(async () => {
-        opts?.onPhaseChange?.('task-linked', 'implement');
+        opts?.onResync?.(['task-linked']);
       });
 
       expect(mockGetLinkedTaskStatuses).toHaveBeenCalledTimes(2);
     });
 
-    it('does nothing when phase-change fires for a non-linked task', async () => {
+    it('does nothing when onResync names only non-linked tasks', async () => {
       const report = makeReport();
       report.phases.now[0] = roadItem({
         ...report.phases.now[0],
@@ -333,18 +333,53 @@ describe('PhasedKanban', () => {
         expect(mockGetLinkedTaskStatuses).toHaveBeenCalledTimes(1);
       });
 
-      // Simulate a phase-change for a DIFFERENT (non-linked) task
+      // Simulate a resync for a DIFFERENT (non-linked) task
       const { usePhaseSync } = await import('@/hooks/use-phase-sync');
       const phaseSyncCalls = (usePhaseSync as unknown as ReturnType<typeof vi.fn>).mock.calls;
       const lastCall = phaseSyncCalls[phaseSyncCalls.length - 1];
-      const opts = lastCall?.[0] as { onPhaseChange?: (taskId: string, phase: string) => void } | undefined;
+      const opts = lastCall?.[0] as { onResync?: (ids: string[] | null) => void } | undefined;
 
       await act(async () => {
-        opts?.onPhaseChange?.('unrelated-task', 'implement');
+        opts?.onResync?.(['unrelated-task']);
       });
 
       // Should NOT have re-fetched — the task isn't in allLinkedIds
       expect(mockGetLinkedTaskStatuses).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-fetches all linked statuses on a reconnect resync (null)', async () => {
+      const report = makeReport();
+      report.phases.now[0] = roadItem({
+        ...report.phases.now[0],
+        linkedTaskId: 'L1',
+      });
+      mockGetLinkedTaskStatuses.mockResolvedValue({ L1: { phase: 'spec', title: 'T' } });
+
+      renderComponent(report);
+      await waitFor(() => {
+        expect(mockGetLinkedTaskStatuses).toHaveBeenCalledTimes(1);
+      });
+
+      const { usePhaseSync } = await import('@/hooks/use-phase-sync');
+      const calls = (usePhaseSync as unknown as ReturnType<typeof vi.fn>).mock.calls;
+      const opts = calls[calls.length - 1]?.[0] as { onResync?: (ids: string[] | null) => void } | undefined;
+
+      await act(async () => {
+        opts?.onResync?.(['X']);
+      });
+      expect(mockGetLinkedTaskStatuses).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        opts?.onResync?.(null);
+      });
+      expect(mockGetLinkedTaskStatuses).toHaveBeenCalledTimes(2);
+      expect(mockGetLinkedTaskStatuses).toHaveBeenLastCalledWith(['L1']);
+
+      await act(async () => {
+        opts?.onResync?.(['L1']);
+      });
+      expect(mockGetLinkedTaskStatuses).toHaveBeenCalledTimes(3);
+      expect(mockGetLinkedTaskStatuses).toHaveBeenLastCalledWith(['L1']);
     });
   });
 

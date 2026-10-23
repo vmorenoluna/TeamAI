@@ -181,7 +181,7 @@ describe('ReviewPanel', () => {
       });
 
       expect(mockMarkTaskDone).toHaveBeenCalledWith('task-1', expect.any(String));
-      await waitFor(() => expect(mockRouterRefresh).toHaveBeenCalled());
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
     it('opens feedback textarea when "Request Changes" is clicked, and closes on Cancel', async () => {
@@ -291,7 +291,7 @@ describe('ReviewPanel', () => {
       });
 
       expect(mockRejectTask).toHaveBeenCalledWith('task-1', 'The PR needs more tests', 'coder', undefined);
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
   });
 
@@ -386,7 +386,7 @@ describe('ReviewPanel', () => {
       });
 
       expect(mockApproveTask).toHaveBeenCalledWith('task-2', 'local-merge', expect.any(String));
-      await waitFor(() => expect(mockRouterRefresh).toHaveBeenCalled());
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
     it('calls approveTask with pull-request when "Open Pull Request" is clicked', async () => {
@@ -406,7 +406,7 @@ describe('ReviewPanel', () => {
       });
 
       expect(mockApproveTask).toHaveBeenCalledWith('task-2', 'pull-request', expect.any(String));
-      await waitFor(() => expect(mockRouterRefresh).toHaveBeenCalled());
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
     it('calls rejectTask when feedback is submitted from awaiting-review phase', async () => {
@@ -443,7 +443,7 @@ describe('ReviewPanel', () => {
       });
 
       expect(mockRejectTask).toHaveBeenCalledWith('task-2', 'Fix the button color', 'coder', undefined);
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
     it('shows a subtask checklist for the Engineer target and passes the selection', async () => {
@@ -495,7 +495,7 @@ describe('ReviewPanel', () => {
       });
 
       expect(mockRejectTask).toHaveBeenCalledWith('task-2', 'Rework these modules', 'coder', [1, 3]);
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
     it('shows a subtask checklist for the Planner target with preserve-list helper text and passes the selection', async () => {
@@ -546,7 +546,7 @@ describe('ReviewPanel', () => {
       });
 
       expect(mockRejectTask).toHaveBeenCalledWith('task-2', 'Re-plan only the migration subtask', 'planner', [2]);
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
   });
 
@@ -1100,7 +1100,7 @@ describe('ReviewPanel', () => {
       });
 
       await waitFor(() => expect(screen.getByText('Open Pull Request')).not.toBeDisabled());
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
     it('AC16: a delivered failure shows the formatted banner containing gh: HTTP 502', async () => {

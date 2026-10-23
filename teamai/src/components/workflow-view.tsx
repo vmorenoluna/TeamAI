@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskModal } from './task-modal';
 import { PIPELINE_PHASES } from '@/constants/phases';
-import type { WorkflowTask } from '@/app/actions/workflow';
+import { getWorkflowTasks, type WorkflowTask } from '@/app/actions/workflow';
 
 // ── Layout constants ─────────────────────────────────────────────────────────
 
@@ -93,8 +94,38 @@ function PhasePopover({ label, tasks, popoverStyle, onSelectTask }: {
 
 interface Props { workflowTasks: WorkflowTask[]; projectPath: string; }
 
-export function WorkflowView({ workflowTasks, projectPath }: Props) {
-  usePhaseSync({ project: projectPath });
+export function WorkflowView({ workflowTasks: workflowTasksProp, projectPath }: Props) {
+  const router = useRouter();
+
+  // Local copy of the server-provided tasks; reset when the prop identity changes
+  // (adjust-state-during-render) and patched by WebSocket-driven re-fetches.
+  const [workflowTasks, setWorkflowTasks] = useState(workflowTasksProp);
+  const [prevProp, setPrevProp] = useState(workflowTasksProp);
+  const resyncRequestIdRef = useRef(0);
+  if (prevProp !== workflowTasksProp) {
+    setPrevProp(workflowTasksProp);
+    setWorkflowTasks(workflowTasksProp);
+    // Invalidate any in-flight re-sync so a stale response can't overwrite the fresh prop.
+    // eslint-disable-next-line react-hooks/refs
+    resyncRequestIdRef.current++;
+  }
+
+  const handleResync = useCallback((changedTaskIds: string[] | null) => {
+    // null = WebSocket reconnect: usePhaseSync already router.refresh()ed, which replaces the prop.
+    if (changedTaskIds === null) return;
+    const requestId = ++resyncRequestIdRef.current;
+    getWorkflowTasks()
+      .then(fresh => {
+        if (requestId === resyncRequestIdRef.current) setWorkflowTasks(fresh);
+      })
+      .catch(err => {
+        console.warn('[workflow-view] re-sync failed:', err);
+        // eslint-disable-next-line local/no-raw-router-refresh -- fallback when the targeted re-sync fails
+        router.refresh();
+      });
+  }, [router]);
+
+  usePhaseSync({ project: projectPath, onResync: handleResync });
 
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);

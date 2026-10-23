@@ -11,7 +11,7 @@
  * (no opts, missing callbacks, ref stability).
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
@@ -178,29 +178,39 @@ describe('usePhaseSync', () => {
 
     // ── Fallback: no onSubtaskProgress callback → router.refresh() ──
 
-    it('falls back to router.refresh when onSubtaskProgress is not provided', () => {
+    it('falls back to a debounced router.refresh when onSubtaskProgress is not provided', () => {
+      vi.useFakeTimers();
       renderHook(() => usePhaseSync());
 
       act(() => {
         gOnMessage!(subtaskProgressPayload('task-1', 3, 7));
       });
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
 
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
       expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
     });
 
     it('does NOT call onPhaseChange for subtask-progress (it is not a phase change)', () => {
+      vi.useFakeTimers();
       const onPhaseChange = vi.fn();
       renderHook(() => usePhaseSync({ onPhaseChange }));
 
       act(() => {
         gOnMessage!(subtaskProgressPayload('task-5', 2, 4));
+        vi.advanceTimersByTime(300);
       });
 
       expect(onPhaseChange).not.toHaveBeenCalled();
       expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
     });
 
-    it('handles multiple subtask-progress events in sequence (fallback)', () => {
+    it('batches multiple subtask-progress events into one refresh (fallback)', () => {
+      vi.useFakeTimers();
       renderHook(() => usePhaseSync());
 
       act(() => {
@@ -208,9 +218,11 @@ describe('usePhaseSync', () => {
         gOnMessage!(subtaskProgressPayload('t1', 2, 5));
         gOnMessage!(subtaskProgressPayload('t1', 3, 5));
         gOnMessage!(subtaskProgressPayload('t2', 4, 4));
+        vi.advanceTimersByTime(300);
       });
 
-      expect(mockRouterRefresh).toHaveBeenCalledTimes(4);
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
     });
 
     it('works alongside phase-change events independently (fallback)', () => {
@@ -226,37 +238,42 @@ describe('usePhaseSync', () => {
 
       expect(onPhaseChange).toHaveBeenCalledOnce();
       expect(onPhaseChange).toHaveBeenCalledWith('task-a', 'qa-review');
-      // subtask-progress events (no callback) trigger immediate refreshes: 2
-      // phase-change is debounced, not yet fired
-      expect(mockRouterRefresh).toHaveBeenCalledTimes(2);
+      // subtask-progress (no callback) shares the debounce window with phase-change
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
 
       act(() => {
         vi.advanceTimersByTime(300);
       });
 
-      expect(mockRouterRefresh).toHaveBeenCalledTimes(3); // +1 debounced phase-change
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
       vi.useRealTimers();
     });
 
     it('falls back when called with no options', () => {
+      vi.useFakeTimers();
       const { result } = renderHook(() => usePhaseSync());
       expect(result.current.reconnect).toBeDefined();
 
       act(() => {
         gOnMessage!(subtaskProgressPayload('task-nocb', 5, 10));
+        vi.advanceTimersByTime(300);
       });
 
       expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
     });
 
     it('falls back on subtask-progress with zero total (edge case)', () => {
+      vi.useFakeTimers();
       renderHook(() => usePhaseSync());
 
       act(() => {
         gOnMessage!(subtaskProgressPayload('task-empty', 0, 0));
+        vi.advanceTimersByTime(300);
       });
 
       expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
     });
 
     // ── Targeted update: onSubtaskProgress callback provided ──
@@ -711,6 +728,177 @@ describe('usePhaseSync', () => {
 
       // The ref-based plumbing routes to v3's closure
       expect(callbacks).toEqual(['v3:t:done']);
+    });
+  });
+
+  // ── onResync, done / refinement rules, reconnect re-sync ─────────────
+
+  describe('onResync', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('AC4: phase-change batches task ids into one onResync and skips router.refresh', () => {
+      const onResync = vi.fn();
+      renderHook(() => usePhaseSync({ onResync }));
+
+      act(() => {
+        gOnMessage!(phaseChangePayload('t1', 'spec'));
+        gOnMessage!(phaseChangePayload('t2', 'plan'));
+        gOnMessage!(phaseChangePayload('t1', 'implement'));
+      });
+      expect(onResync).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(onResync).toHaveBeenCalledOnce();
+      expect(onResync).toHaveBeenCalledWith(['t1', 't2']);
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('AC5: task-updated and action-result trigger onResync; ids optional', () => {
+      const onResync = vi.fn();
+      renderHook(() => usePhaseSync({ onResync }));
+
+      act(() => {
+        gOnMessage!({ type: 'task-updated', taskId: 'a' });
+        gOnMessage!({ type: 'action-result', operationId: 'op', ok: true });
+        vi.advanceTimersByTime(300);
+      });
+      expect(onResync).toHaveBeenCalledOnce();
+      expect(onResync).toHaveBeenCalledWith(['a']);
+
+      act(() => {
+        gOnMessage!({ type: 'action-result', operationId: 'op2', ok: false });
+        vi.advanceTimersByTime(300);
+      });
+      expect(onResync).toHaveBeenLastCalledWith([]);
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('AC6: subtask-progress uses onResync only when onSubtaskProgress is absent', () => {
+      const onResync = vi.fn();
+      const onSubtaskProgress = vi.fn();
+      const { unmount } = renderHook(() => usePhaseSync({ onResync, onSubtaskProgress }));
+      act(() => {
+        gOnMessage!({ type: 'subtask-progress', taskId: 't', completed: 1, total: 2 });
+        vi.advanceTimersByTime(300);
+      });
+      expect(onSubtaskProgress).toHaveBeenCalledOnce();
+      expect(onResync).not.toHaveBeenCalled();
+      unmount();
+
+      resetWsCallbacks();
+      renderHook(() => usePhaseSync({ onResync }));
+      act(() => {
+        gOnMessage!({ type: 'subtask-progress', taskId: 't', completed: 1, total: 2 });
+        vi.advanceTimersByTime(300);
+      });
+      expect(onResync).toHaveBeenCalledWith(['t']);
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('AC7: phase done additionally refreshes once alongside one onResync', () => {
+      const onResync = vi.fn();
+      renderHook(() => usePhaseSync({ onResync }));
+
+      act(() => {
+        gOnMessage!(phaseChangePayload('t1', 'qa-review'));
+        gOnMessage!(phaseChangePayload('t1', 'done'));
+        vi.advanceTimersByTime(300);
+      });
+      expect(onResync).toHaveBeenCalledOnce();
+      expect(onResync).toHaveBeenCalledWith(['t1']);
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+    });
+
+    it('AC8: refinement-update always schedules a debounced router.refresh', () => {
+      const onResync = vi.fn();
+      renderHook(() => usePhaseSync({ onResync }));
+
+      act(() => {
+        gOnMessage!({ type: 'refinement-update', taskId: 'x' });
+      });
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      expect(onResync).not.toHaveBeenCalled();
+    });
+
+    it('AC9: first open does nothing; reconnect refreshes and resyncs with null immediately', () => {
+      const onResync = vi.fn();
+      const onConnectionChange = vi.fn();
+      renderHook(() => usePhaseSync({ onResync, onConnectionChange }));
+
+      act(() => {
+        gOnConnectionChange!(true);
+      });
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+      expect(onResync).not.toHaveBeenCalled();
+
+      act(() => {
+        gOnConnectionChange!(false);
+        gOnMessage!(phaseChangePayload('t1', 'spec'));
+        gOnConnectionChange!(true);
+      });
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      expect(onResync).toHaveBeenCalledOnce();
+      expect(onResync).toHaveBeenCalledWith(null);
+      expect(onConnectionChange.mock.calls.map((c) => c[0])).toEqual([true, false, true]);
+
+      // pending debounce was cleared — nothing fires later
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      expect(onResync).toHaveBeenCalledOnce();
+    });
+
+    it('AC9: reconnect without onResync still refreshes; works after reconnect()', () => {
+      const { result } = renderHook(() => usePhaseSync());
+      act(() => {
+        gOnConnectionChange!(true);
+      });
+      act(() => {
+        result.current.reconnect();
+        gOnConnectionChange!(false);
+        gOnConnectionChange!(true);
+      });
+      expect(mockWssReconnect).toHaveBeenCalledOnce();
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+    });
+
+    it('AC10: pending ids and flags do not leak across windows or unmount', () => {
+      const onResync = vi.fn();
+      const { unmount } = renderHook(() => usePhaseSync({ onResync }));
+
+      act(() => {
+        gOnMessage!(phaseChangePayload('t1', 'done'));
+        vi.advanceTimersByTime(300);
+      });
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+
+      act(() => {
+        gOnMessage!(phaseChangePayload('t2', 'spec'));
+        vi.advanceTimersByTime(300);
+      });
+      expect(onResync).toHaveBeenLastCalledWith(['t2']);
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+
+      act(() => {
+        gOnMessage!(phaseChangePayload('t3', 'spec'));
+      });
+      unmount();
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(onResync).toHaveBeenCalledTimes(2);
     });
   });
 });

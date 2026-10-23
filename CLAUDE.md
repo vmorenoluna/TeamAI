@@ -152,6 +152,8 @@ function Button({ initialEnabled }: { initialEnabled: boolean }) {
 
 Why: phase-change events trigger UI re-renders that re-mount components. Any component using `useState(literal)` + async-fetch-on-mount will briefly show the wrong default on every refresh.
 
+Mutations rely on the server action's `revalidatePath` — client code does not call `router.refresh()` after a mutation (`useServerMutation` no longer does). WebSocket-driven views re-sync through `usePhaseSync`'s `onResync` callback, which also runs a full re-sync when the WebSocket reconnects, so a dropped event cannot leave a card or phase stale.
+
 ## Key Design Decisions
 
 - **NDJSON streaming**: Claude CLI outputs newline-delimited JSON; the buffer parser in ProcessManager handles chunks that split across multiple `data` events.
