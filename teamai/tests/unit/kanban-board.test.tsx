@@ -1125,18 +1125,18 @@ describe('KanbanBoard', () => {
       return vi.mocked(usePhaseSync).mock.calls.at(-1)![0]!.onResync!;
     }
 
-    it('AC11: re-fetches tasks on resync (ids and null) and renders the result', async () => {
+    it('AC11: ignores resync(null) and re-fetches tasks on resync(ids)', async () => {
       mockGetTasks.mockResolvedValue([task({ id: 'n1', title: 'Fresh Task', phase: 'implement' })]);
       renderBoard([task({ id: 'o1', title: 'Old Task' })]);
+
+      await act(async () => { latestResync()(null); });
+      expect(mockGetTasks).not.toHaveBeenCalled();
+      expect(screen.getByText('Old Task')).toBeInTheDocument();
 
       await act(async () => { latestResync()(['o1']); });
       await waitFor(() => expect(screen.getByText('Fresh Task')).toBeInTheDocument());
       expect(screen.queryByText('Old Task')).not.toBeInTheDocument();
-
-      mockGetTasks.mockResolvedValue([task({ id: 'n2', title: 'After Reconnect' })]);
-      await act(async () => { latestResync()(null); });
-      await waitFor(() => expect(screen.getByText('After Reconnect')).toBeInTheDocument());
-      expect(mockGetTasks).toHaveBeenCalledTimes(2);
+      expect(mockGetTasks).toHaveBeenCalledTimes(1);
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 

@@ -229,9 +229,12 @@ export function KanbanBoard({ tasks: tasksProp, projectPath, doneHistory = [], d
     });
   }, []);
 
-  // Fires for changed-task events and (with null) after a WebSocket reconnect;
-  // both re-fetch the whole list so a missed event cannot leave cards stale.
-  const onResync = useCallback(() => {
+  // Fires with the changed task ids for phase-change events. A null argument
+  // means a WebSocket reconnect: usePhaseSync already called router.refresh(),
+  // which delivers fresh props (handled by the prop-reset above), so there is
+  // nothing to re-fetch here.
+  const onResync = useCallback((changedTaskIds: string[] | null) => {
+    if (changedTaskIds === null) return;
     const reqId = ++tasksReqIdRef.current;
     getTasks()
       .then(fresh => {
