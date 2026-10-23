@@ -5,7 +5,7 @@ import { join } from 'path';
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
 import { engineCall } from '@/engine/engine-client';
-import { checkDockerAvailable, type ContainerState, type ValidationStep, type ValidationStatus } from '@/lib/container-manager';
+import type { ContainerState, ValidationStep, ValidationStatus } from '@/lib/container-manager';
 
 export interface ContainerConfig {
   enabled: boolean;
@@ -22,7 +22,8 @@ export interface ContainerConfigResult extends ContainerConfig {
 export async function getContainerConfig(): Promise<ContainerConfigResult> {
   const projectPath = await getActiveProjectPath();
   const cfgPath = join(projectPath, '.teamai', 'container.json');
-  const available = await checkDockerAvailable();
+  // Renders the settings page: an unreachable engine reads as "Docker unavailable", not an error.
+  const available = await engineCall<boolean>('containers.isDockerAvailable', [{}], { timeoutMs: 5000 }).catch(() => false);
   if (existsSync(cfgPath)) {
     try { return { ...JSON.parse(readFileSync(cfgPath, 'utf-8')), dockerAvailable: available }; } catch { /* fall through */ }
   }

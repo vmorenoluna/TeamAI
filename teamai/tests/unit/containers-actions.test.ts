@@ -4,15 +4,11 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 let projectPath = '';
-const checkDockerAvailable = vi.fn();
 const engineCall = vi.fn();
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 vi.mock('@/app/actions/projects', () => ({ getActiveProjectPath: async () => projectPath }));
 vi.mock('@/engine/engine-client', () => ({ engineCall: (...args: unknown[]) => engineCall(...args) }));
-vi.mock('@/lib/container-manager', () => ({
-  checkDockerAvailable: (...args: unknown[]) => checkDockerAvailable(...args),
-}));
 
 import { revalidatePath } from 'next/cache';
 import {
@@ -27,11 +23,16 @@ describe('container server actions (engine wrappers)', () => {
     projectPath = mkdtempSync(join(tmpdir(), 'containers-actions-'));
   });
 
-  it('getContainerConfig without container.json reports enabled/available from a single local probe', async () => {
-    checkDockerAvailable.mockResolvedValue(true);
+  it('getContainerConfig without container.json reports enabled/available from a single engine probe', async () => {
+    engineCall.mockResolvedValue(true);
     expect(await getContainerConfig()).toEqual({ enabled: true, dockerAvailable: true });
-    expect(checkDockerAvailable).toHaveBeenCalledTimes(1);
-    expect(engineCall).not.toHaveBeenCalled();
+    expect(engineCall).toHaveBeenCalledTimes(1);
+    expect(engineCall).toHaveBeenCalledWith('containers.isDockerAvailable', [{}], { timeoutMs: 5000 });
+  });
+
+  it('getContainerConfig treats an unreachable engine as Docker unavailable', async () => {
+    engineCall.mockRejectedValue(new Error('engine down'));
+    expect(await getContainerConfig()).toEqual({ enabled: false, dockerAvailable: false });
   });
 
   it('saveContainerConfig writes container.json locally, revalidates, and delegates bootstrap to the engine', async () => {
@@ -66,6 +67,5 @@ describe('container server actions (engine wrappers)', () => {
     engineCall.mockResolvedValueOnce(undefined);
     await resetDockerAvailability();
     expect(engineCall).toHaveBeenLastCalledWith('containers.resetDockerAvailability', [{}]);
-    expect(checkDockerAvailable).not.toHaveBeenCalled();
   });
 });
