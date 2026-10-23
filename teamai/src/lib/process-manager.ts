@@ -336,6 +336,8 @@ export class ProcessManager extends EventEmitter {
     // after 'error' on spawn failure), so no late stdout is lost by pruning.
     proc.on('close', () => {
       if (pruneTimer) clearTimeout(pruneTimer);
+      // 'close' follows 'error' on spawn failure too, so the entry never leaks.
+      this.childRegistry.remove(id);
       this._pruneSession(id, created);
     });
     proc.on('exit', (code, signal) => {
@@ -361,8 +363,6 @@ export class ProcessManager extends EventEmitter {
 
     this.sessions.set(id, created);
     if (proc.pid !== undefined) this.childRegistry.add({ pid: proc.pid, sessionId: id, kind: 'agent' });
-    // Fires on spawn failure too ('close' follows 'error'), so the entry never leaks.
-    proc.once('close', () => this.childRegistry.remove(id));
 
     return id;
   }

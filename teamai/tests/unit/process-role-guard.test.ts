@@ -87,7 +87,7 @@ describe('process-role guard', () => {
     });
   });
 
-  describe.each([[undefined], ['engine']])('role %s', (role) => {
+  describe.each<[string | undefined]>([[undefined], ['engine']])('role %s', (role) => {
     beforeEach(() => {
       if (role === undefined) delete process.env.TEAMAI_PROCESS_ROLE;
       else process.env.TEAMAI_PROCESS_ROLE = role;
@@ -98,7 +98,7 @@ describe('process-role guard', () => {
       appEvents.on('task-updated', listener);
       try {
         const task = new TaskStore(root).create('id1', 'Title', 'desc');
-        expect(existsSync(join(root, '.teamai', task.slug, 'task.json'))).toBe(true);
+        expect(existsSync(join(root, '.teamai', task.slug!, 'task.json'))).toBe(true);
         expect(listener).toHaveBeenCalledWith({ taskId: 'id1', projectRoot: root });
       } finally {
         appEvents.off('task-updated', listener);
