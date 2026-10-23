@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { normalizeWakeupArtifact, checkArtifactProgress } from '../../src/lib/orchestrator/wakeup';
 
 describe('normalizeWakeupArtifact', () => {
@@ -28,6 +28,11 @@ describe('normalizeWakeupArtifact', () => {
 
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it('anchors a .teamai/<slug>/ path to the spec dir under the project root, not the worktree', () => {
+    const { artifact } = normalizeWakeupArtifact('.teamai/my-task/job.log', cwd, specDir);
+    expect(resolve(cwd, artifact!)).toBe(join(specDir, 'job.log'));
   });
 
   it('returns undefined when no artifact is declared', () => {

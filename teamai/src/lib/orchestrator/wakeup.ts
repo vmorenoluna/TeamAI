@@ -448,7 +448,9 @@ export async function checkForPhaseWakeup(opts: PhaseWakeupCheckOptions): Promis
       const normalized = normalizeWakeupArtifact(wd.expected_artifact, opts.cwd, opts.specDir);
       if (normalized.warning) logToOutput(opts.pipeline.specPath, '[WAKEUP] ' + normalized.warning + '\n');
       opts.pipeline.wakeupArtifact = normalized.artifact;
-      opts.pipeline.wakeupProgressPath = wd.progress_log_path;
+      const normalizedLog = normalizeWakeupArtifact(wd.progress_log_path, opts.cwd, opts.specDir);
+      if (normalizedLog.warning) logToOutput(opts.pipeline.specPath, '[WAKEUP] progress_log_path: ' + normalizedLog.warning + '\n');
+      opts.pipeline.wakeupProgressPath = normalizedLog.artifact;
       opts.pipeline.wakeupArtifactMtimeAtSchedule = normalized.artifact
         ? snapshotMtime(path.resolve(opts.cwd, normalized.artifact))
         : null;

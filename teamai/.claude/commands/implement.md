@@ -224,9 +224,13 @@ If a long-running background script produces incremental output while running
 
 ### When the run's output is a committed artifact
 
-> **Note:** The `$TEAMAI_SPEC_DIR` environment variable is available to locate the
-> `.teamai/{taskId}/` directory from within the worktree. Use it when you need to
-> reference the spec directory (your cwd is the worktree, not the project root).
+> **Note:** `$TEAMAI_SPEC_DIR` is the absolute path of this task's spec directory
+> (`<project root>/.teamai/<slug>/`). It is **not** inside your worktree: your cwd is the
+> worktree, and a relative `.teamai/<slug>/…` path resolves there, to a directory the
+> orchestrator never reads. The request states the same path as `SPEC_DIR=`. Every file
+> the orchestrator looks for (`subtask_wakeup-st<ID>.json`, `subtask_blocked-st<ID>.json`,
+> job logs, PID files) must be created through `$TEAMAI_SPEC_DIR` — never through a
+> relative `.teamai/…` path.
 
 If the subtask requires running a script that **produces files you will commit** (e.g.,
 `summary.jsonl`, `aggregate.md`, log directories):
@@ -287,26 +291,40 @@ warning once a long job is running; if that happens before you've written
 apart from a subtask that made no progress, and your commits for it are rejected as a
 subtask that made no progress however far the job got.
 
-1. **Detach the job** so it keeps running after your session ends:
-   `nohup <command> > "$TEAMAI_SPEC_DIR/job-st<ID>.log" 2>&1 & disown`. A bare `&` only
-   backgrounds within your current shell and dies the instant your session exits.
+1. **Detach the job** so it keeps running after your session ends, and record its PID:
+   ```sh
+   nohup <command> > "$TEAMAI_SPEC_DIR/job-st<ID>.log" 2>&1 &
+   pid=$!; disown
+   [ -r "/proc/$pid/winpid" ] && pid=$(cat "/proc/$pid/winpid")   # Git Bash/MSYS/Cygwin only
+   echo "$pid" > "$TEAMAI_SPEC_DIR/job-st<ID>.pid"
+   ```
+   A bare `&` only backgrounds within your current shell and dies the instant your
+   session exits. The PID file must hold the PID **the operating system itself uses**,
+   because the orchestrator (a native process) probes it to tell a running job from a
+   dead one. On Linux and macOS that is `$!` as is. Under Git Bash/MSYS on Windows `$!`
+   is an emulated PID the host does not know, so the `winpid` line swaps in the real
+   Windows PID; a job started from PowerShell with `Start-Process -PassThru` already
+   has the native PID in `.Id`. A wrong PID makes a live job look dead.
    **Everything the wakeup needs to find on re-entry — the job log, the PID file, and
-   the `expected_artifact` — must live inside the worktree, never in `/tmp` or any other
-   container-local path.** Each re-entry may run in a fresh container: a `/tmp` file
-   from this session does not exist there, so the orchestrator's freshness check sees
-   an artifact that never updates and spends your wakeup attempts without ever showing
-   you a failure. Put these files in `$TEAMAI_SPEC_DIR` (`.teamai/{slug}/` — inside the
-   worktree and gitignored) unless the artifact belongs in an already-gitignored project
-   path. Gitignored matters: an untracked file elsewhere in the tree makes
-   `git status --porcelain` dirty, which fails any clean-tree check in the project's
-   own tooling or gets swept into the orchestrator's auto-commit. `/tmp` is only for scratch nothing outside this
-   turn will read again.
+   the `expected_artifact` — must live in `$TEAMAI_SPEC_DIR` or in a gitignored path
+   inside the worktree, never in `/tmp` or any other container-local path.** Each
+   re-entry may run in a fresh container: a `/tmp` file from this session does not exist
+   there, so the orchestrator's freshness check sees an artifact that never updates and
+   spends your wakeup attempts without ever showing you a failure. `$TEAMAI_SPEC_DIR`
+   is outside the worktree, so its files never dirty `git status --porcelain`; an
+   untracked file elsewhere in the tree does, which fails any clean-tree check in the
+   project's own tooling or gets swept into the orchestrator's auto-commit. `/tmp` is
+   only for scratch nothing outside this turn will read again.
 2. **If you're managing more than one job at once** (e.g. a server plus its
    client, or several parallel runs), stop or relaunch each one by its own PID
-   (`kill $(cat job.pid)`) — never by a command-line pattern match
+   (read it from that job's PID file) — never by a command-line pattern match
    (`pkill -f <substring>`). A substring broad enough to match every job's
    command line can also match your own shell's, killing the session that's
    trying to manage them right when it's about to record what it just did.
+   Check or stop a job with the native tool for the OS the PID came from: `kill -0 "$pid"`
+   / `kill "$pid"` on Linux and macOS; on Windows `tasklist //FI "PID eq $pid" //NH` (Git
+   Bash) or `Get-Process -Id $pid` (PowerShell) to check, and `taskkill //PID $pid //T`
+   to stop — by that exact PID only.
 3. Write a `subtask_wakeup-st<ID>.json` file (where `<ID>` is your current
    subtask ID, e.g. `subtask_wakeup-st3.json`) to the spec directory
    (`$TEAMAI_SPEC_DIR`). The per-subtask filename prevents parallel subtasks
@@ -344,11 +362,14 @@ do nothing but write another wakeup file.
 - `background_command`: the command you ran (informational)
 - `expected_artifact`: the file you expect the process to produce, as a path relative to
   the worktree root (`results/summary.jsonl`). For a file under `$TEAMAI_SPEC_DIR` write
-  `.teamai/<slug>/<file>`. Never write an absolute path such as `/workspaces/...` or the
+  `.teamai/<slug>/<file>` — that notation only names the file in this JSON; the orchestrator
+  anchors it to the spec directory, and you still create the file itself through
+  `$TEAMAI_SPEC_DIR`. Never write an absolute path such as `/workspaces/...` or the
   expanded value of `$TEAMAI_SPEC_DIR`: the orchestrator checks the file from the host,
   where a container-absolute path does not exist, so the artifact would read as
   never-updated and your wakeup attempts would be spent without a result.
-- `progress_log_path`: the job's own log file, relative to the worktree root.
+- `progress_log_path`: the job's own log file, written like `expected_artifact` (relative to
+  the worktree root, or `.teamai/<slug>/<file>` for a file under `$TEAMAI_SPEC_DIR`).
   Include it whenever the job writes one — the orchestrator periodically
   checks this file's freshness while you're asleep and re-enters you early if
   it goes stale, instead of always waiting out the full `wakeup_at` window.
@@ -375,8 +396,8 @@ genuine progress and resets the wakeup attempt budget instead of charging the fi
 against the same 3-attempt cap as a job that simply needed more time. Reusing the
 exact same command when nothing actually changed still counts as a normal attempt.
 
-Use `$TEAMAI_SPEC_DIR` to resolve the path — your cwd is the worktree, not
-the project root.
+Always resolve the spec directory through `$TEAMAI_SPEC_DIR` (the absolute `SPEC_DIR=` in
+your request) — your cwd is the worktree, not the project root.
 
 ### When you've root-caused a defect and retrying won't help
 
