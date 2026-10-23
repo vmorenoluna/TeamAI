@@ -1163,9 +1163,22 @@ export async function buildSubtaskRequest(
     subtask.description + '\n\n' +
     'Files: ' + subtask.files.join(', ') + '\n\n' +
     criteriaLine + '\n' +
-    'PROJECT_ROOT=' + deps.projectRoot + '\n\n';
+    'PROJECT_ROOT=' + deps.projectRoot + '\n' +
+    specDirLine(deps.projectRoot, pipeline.specPath) + '\n';
 
   return { command, request, wasWakeupReentry };
+}
+
+/**
+ * The `SPEC_DIR=<absolute path>` line of the coder's request: the one directory
+ * the orchestrator reads wakeup, blocked and PID files from. Restating the value
+ * of `$TEAMAI_SPEC_DIR` in the prompt keeps a session from addressing it as a
+ * relative `.teamai/<slug>/` path, which resolves inside the worktree instead.
+ * Empty in container mode, where the session sees the container-side path and
+ * `$TEAMAI_SPEC_DIR` is the only correct source.
+ */
+function specDirLine(projectRoot: string, specPath: string): string {
+  return readContainerConfig(projectRoot).enabled ? '' : 'SPEC_DIR=' + path.resolve(specPath) + '\n';
 }
 
 /**
@@ -1717,7 +1730,11 @@ export async function consumeSubtaskWakeupFiles(
         const normalized = normalizeWakeupArtifact(wd.expected_artifact, cwd, pipeline.specPath);
         if (normalized.warning) logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + wd.subtask_id + ': ' + normalized.warning + '\n');
         pipeline.wakeupArtifact = normalized.artifact;
-        pipeline.wakeupProgressPath = wd.progress_log_path;
+        // Anchored like the artifact: a `.teamai/<slug>/…` log is the spec dir's copy
+        // under the project root, not a lookalike path inside the worktree.
+        const normalizedLog = normalizeWakeupArtifact(wd.progress_log_path, cwd, pipeline.specPath);
+        if (normalizedLog.warning) logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + wd.subtask_id + ': progress_log_path: ' + normalizedLog.warning + '\n');
+        pipeline.wakeupProgressPath = normalizedLog.artifact;
         // Snapshot the artifact's current mtime so a FUTURE re-entry that
         // ends without writing another wakeup file can be verified — see
         // the freshness check below and the field's doc in types.ts.

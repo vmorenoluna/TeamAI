@@ -472,6 +472,7 @@ describe('implement routing', () => {
     expect(s.request).toContain('Branch: feat/build-the-thing');
     expect(s.request).toContain('#1: Setup');
     expect(s.request).toContain(`PROJECT_ROOT=${ctx.root}`);
+    expect(s.request).toContain(`SPEC_DIR=${ctx.specPath}`);
     expect(s.request).not.toContain('QA FEEDBACK');
     expect(s.request).not.toContain('WAKEUP RE-ENTRY');
     expect(s.request).not.toContain('DELIVERABLE RE-VERIFICATION');
