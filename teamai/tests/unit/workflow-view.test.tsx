@@ -4,10 +4,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { WorkflowView } from '@/components/workflow-view';
+import { usePhaseSync } from '@/hooks/use-phase-sync';
+import { getWorkflowTasks } from '@/app/actions/workflow';
 import type { WorkflowTask } from '@/app/actions/workflow';
 
 vi.mock('@/hooks/use-phase-sync', () => ({
   usePhaseSync: vi.fn(),
+}));
+
+const refreshMock = vi.fn();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: refreshMock }),
+}));
+
+vi.mock('@/app/actions/workflow', () => ({
+  getWorkflowTasks: vi.fn(),
 }));
 
 vi.mock('@/components/task-panel', () => ({
@@ -303,5 +314,76 @@ describe('WorkflowView', () => {
     const implNode = screen.getByText('Implement');
     const parent = implNode.closest('[class*="animate-pulse-glow"]');
     expect(parent).toBeNull();
+  });
+
+  // ── Re-sync (AC14) ────────────────────────────────────────────────────
+
+  describe('onResync', () => {
+    function captureOnResync(): (ids: string[] | null) => void {
+      const calls = vi.mocked(usePhaseSync).mock.calls;
+      const opts = calls[calls.length - 1][0] as { onResync: (ids: string[] | null) => void };
+      return opts.onResync;
+    }
+
+    beforeEach(() => {
+      vi.mocked(usePhaseSync).mockClear();
+      vi.mocked(getWorkflowTasks).mockReset();
+      refreshMock.mockClear();
+    });
+
+    it('passes onResync to usePhaseSync', () => {
+      render(<WorkflowView projectPath="/test" workflowTasks={[]} />);
+      expect(typeof captureOnResync()).toBe('function');
+    });
+
+    it('re-fetches and applies tasks when called with task ids', async () => {
+      vi.mocked(getWorkflowTasks).mockResolvedValue([
+        makeWorkflowTask({ task: { id: 'n', title: 'Fresh', phase: 'backlog' } }),
+      ]);
+      render(<WorkflowView projectPath="/test" workflowTasks={[]} />);
+      expect(screen.getByText(/No tickets yet/)).toBeInTheDocument();
+      await act(async () => { captureOnResync()(['n']); });
+      expect(getWorkflowTasks).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText(/No tickets yet/)).not.toBeInTheDocument();
+    });
+
+    it('does nothing when called with null', async () => {
+      render(<WorkflowView projectPath="/test" workflowTasks={[]} />);
+      await act(async () => { captureOnResync()(null); });
+      expect(getWorkflowTasks).not.toHaveBeenCalled();
+      expect(refreshMock).not.toHaveBeenCalled();
+    });
+
+    it('warns and falls back to router.refresh() when the fetch fails', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const err = new Error('boom');
+      vi.mocked(getWorkflowTasks).mockRejectedValue(err);
+      render(<WorkflowView projectPath="/test" workflowTasks={[]} />);
+      await act(async () => { captureOnResync()([]); });
+      expect(warn).toHaveBeenCalledWith('[workflow-view] re-sync failed:', err);
+      expect(refreshMock).toHaveBeenCalledTimes(1);
+      warn.mockRestore();
+    });
+
+    it('ignores a stale response superseded by a newer request', async () => {
+      let resolveFirst!: (v: WorkflowTask[]) => void;
+      vi.mocked(getWorkflowTasks)
+        .mockImplementationOnce(() => new Promise(r => { resolveFirst = r; }))
+        .mockResolvedValueOnce([makeWorkflowTask({ task: { id: 'b', title: 'Second', phase: 'backlog' } })]);
+      render(<WorkflowView projectPath="/test" workflowTasks={[]} />);
+      await act(async () => { captureOnResync()(['a']); });
+      await act(async () => { captureOnResync()(['b']); });
+      await act(async () => { resolveFirst([]); });
+      expect(screen.queryByText(/No tickets yet/)).not.toBeInTheDocument();
+    });
+
+    it('resets local state when the workflowTasks prop changes', () => {
+      const { rerender } = render(<WorkflowView projectPath="/test" workflowTasks={[]} />);
+      expect(screen.getByText(/No tickets yet/)).toBeInTheDocument();
+      rerender(<WorkflowView projectPath="/test" workflowTasks={[
+        makeWorkflowTask({ task: { id: 'p', title: 'P', phase: 'backlog' } }),
+      ]} />);
+      expect(screen.queryByText(/No tickets yet/)).not.toBeInTheDocument();
+    });
   });
 });
