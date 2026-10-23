@@ -4,6 +4,7 @@ import { processManager } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath, checkDockerAvailable } from './container-manager';
 import { TaskStore } from './task-store';
 import { slugify } from './utils';
+import { assertNotApiProcess } from './process-role';
 import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitFile, worktreeGitEnv, execGit, execGitCapture, execGitQueued } from './orchestrator/worktree-utils';
 import { rotateOutputLog, persistAndEmitPhase, savePipelineState, restorePipelineState, pipelineAdvancePhase } from './orchestrator/pipeline-state';
 import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedback';
@@ -38,6 +39,11 @@ export class Orchestrator {
   constructor(private projectRoot: string) {
     this.taskStore = new TaskStore(projectRoot);
     this._ctx = this._buildPhaseContext();
+  }
+
+  /** Ids of tasks with a pipeline currently executing (same set as isTaskActive). */
+  activeTaskIds(): string[] {
+    return [...this.activeTasks];
   }
 
   /** Whether a pipeline is currently executing for the given task. */
@@ -1253,10 +1259,20 @@ if (!g.__orchestrators) g.__orchestrators = new Map<string, Orchestrator>();
 const orchestrators = g.__orchestrators as Map<string, Orchestrator>;
 
 export function getOrchestrator(projectPath: string): Orchestrator {
+  assertNotApiProcess('getOrchestrator');
   if (!orchestrators.has(projectPath)) {
     orchestrators.set(projectPath, new Orchestrator(projectPath));
   }
   return orchestrators.get(projectPath)!;
+}
+
+/** Ids of every task with a pipeline currently executing, across all projects. */
+export function getActiveTaskIds(): string[] {
+  const ids: string[] = [];
+  for (const orchestrator of orchestrators.values()) {
+    for (const id of orchestrator.activeTaskIds()) ids.push(id);
+  }
+  return ids;
 }
 
 // Re-export git platform utilities (extracted to git-platform.ts)

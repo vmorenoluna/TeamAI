@@ -2,6 +2,7 @@ import { finalizeSupersededTickets, isHeldBySuperseder } from './orchestrator/ba
 import { TaskStore } from './task-store';
 import { getOrchestrator } from './orchestrator';
 import { processManager } from './process-manager';
+import { assertNotApiProcess } from './process-role';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
@@ -116,6 +117,7 @@ export { isAutoModeEnabled, getAutoModeState };
 // ── Public API ──────────────────────────────────────────────────────────────
 
 export function setAutoModeState(projectRoot: string, enabled: boolean, maxParallel: number = 1): void {
+  assertNotApiProcess('setAutoModeState');
   const state = getState(projectRoot);
   const changed = enabled !== state.enabled || maxParallel !== state.maxParallel;
 

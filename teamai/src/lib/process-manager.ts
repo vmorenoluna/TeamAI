@@ -8,6 +8,8 @@ import { readFileSync, existsSync, appendFileSync, writeFileSync, unlinkSync } f
 import { containerManager, readContainerConfig, readContainerRemoteUser, hostToContainerPath } from './container-manager';
 import { getToolPath } from './tool-checker';
 import { log, warn } from './logger';
+import { assertNotApiProcess } from './process-role';
+import { ChildRegistry } from '../engine/child-registry';
 import { readCommandTemplate } from './command-templates';
 
 
@@ -163,6 +165,8 @@ export function readRoleSystemPrompt(
 export class ProcessManager extends EventEmitter {
   private sessions: Map<string, AgentSession> = new Map();
   private terminalSessions: Map<string, TerminalSession> = new Map();
+  /** Live agent/PTY child PIDs on disk, so a new engine can reap orphans. */
+  private childRegistry = new ChildRegistry();
 
   /**
    * Spawn a new Claude CLI subprocess for an agent session.
@@ -182,6 +186,7 @@ export class ProcessManager extends EventEmitter {
     projectRoot?: string;
     logFile?: string;   // append formatted agent output here for cross-phase persistence
   }): Promise<string> {
+    assertNotApiProcess('ProcessManager.createSession');
     const id = randomUUID();
 
     const claudeArgs = [
@@ -355,6 +360,9 @@ export class ProcessManager extends EventEmitter {
     });
 
     this.sessions.set(id, created);
+    if (proc.pid !== undefined) this.childRegistry.add({ pid: proc.pid, sessionId: id, kind: 'agent' });
+    // Fires on spawn failure too ('close' follows 'error'), so the entry never leaks.
+    proc.once('close', () => this.childRegistry.remove(id));
 
     return id;
   }
@@ -539,6 +547,7 @@ export class ProcessManager extends EventEmitter {
     role: string;
     model?: string;
   }): string {
+    assertNotApiProcess('ProcessManager.createTerminalSession');
     const id = randomUUID();
     const roleFile = join(opts.projectPath, '.claude', 'roles', opts.role);
     // Read content inline to avoid Windows path issues with --append-system-prompt-file
@@ -595,6 +604,7 @@ export class ProcessManager extends EventEmitter {
       env: { ...process.env, TEAMAI_CREATE_TASK_CLI: createTaskCliPath } as Record<string, string>,
     });
 
+    this.childRegistry.add({ pid: ptyProcess.pid, sessionId: id, kind: 'terminal' });
     this.terminalSessions.set(id, {
       id,
       ptyProcess,
@@ -616,6 +626,7 @@ export class ProcessManager extends EventEmitter {
     });
 
     ptyProcess.onExit(() => {
+      this.childRegistry.remove(id);
       if (promptFile) {
         try { unlinkSync(promptFile); } catch { /* already gone */ }
       }
@@ -642,6 +653,7 @@ export class ProcessManager extends EventEmitter {
     if (s) {
       s.ptyProcess.kill();
       this.terminalSessions.delete(sessionId);
+      this.childRegistry.remove(sessionId);
     }
   }
 

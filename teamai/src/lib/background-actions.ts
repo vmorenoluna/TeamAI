@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { processManager } from '@/lib/process-manager';
 import { error as logError } from '@/lib/logger';
+import { assertNotApiProcess } from '@/lib/process-role';
 
 export type BackgroundActionName =
   | 'approve'
@@ -81,6 +82,7 @@ export function runInBackground(
   opts: RunInBackgroundOptions,
   work: () => Promise<unknown>,
 ): string {
+  assertNotApiProcess('runInBackground');
   const { action, taskId, projectRoot, notify } = opts;
   const operationId = opts.operationId ?? randomUUID();
 

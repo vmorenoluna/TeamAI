@@ -11,7 +11,8 @@ import { isMissing, readTextIfExists } from './fs-async';
 import { slugify } from './utils';
 import { warn as logWarn } from './logger';
 import { PHASE_ARTIFACTS } from './orchestrator/artifacts';
-import { processManager } from './process-manager';
+import { appEvents } from './app-events';
+import { assertNotApiProcess } from './process-role';
 import { withBoardLock } from './board-lock';
 
 type MergeStrategy = 'local-merge' | 'pull-request';
@@ -182,7 +183,7 @@ export class TaskStore {
    * no data and is never treated as recovery-authoritative.
    */
   private _emitUpdated(taskId: string): void {
-    processManager.emit('task-updated', { taskId, projectRoot: this.projectRoot });
+    appEvents.emit('task-updated', { taskId, projectRoot: this.projectRoot });
   }
 
   private _invalidateIndex(): void {
@@ -271,6 +272,7 @@ export class TaskStore {
   }
 
   create(id: string, title: string, description: string, source?: string, competitiveContext?: string, taskType?: string): Task {
+    assertNotApiProcess('TaskStore.create');
     // Under the board lock (board-lock.ts): a ticket must not appear between
     // an overlap check's board comparison and its writes.
     return withBoardLock(this.specsDir, () => this._create(id, title, description, source, competitiveContext, taskType));
@@ -308,6 +310,7 @@ export class TaskStore {
   }
 
   update(id: string, fields: Partial<Omit<Task, 'id' | 'createdAt'>>): void {
+    assertNotApiProcess('TaskStore.update');
     const task = this.getById(id);
     if (!task) throw new Error(`Task ${id} not found`);
     const updated = { ...task, ...fields, updatedAt: new Date().toISOString() };
@@ -317,6 +320,7 @@ export class TaskStore {
   }
 
   updatePhase(id: string, phase: string, eventExtra?: Record<string, unknown>): void {
+    assertNotApiProcess('TaskStore.updatePhase');
     const task = this.getById(id);
     if (!task) throw new Error(`Task ${id} not found`);
 
@@ -452,6 +456,7 @@ export class TaskStore {
    * dependency checks correct across that cleanup and server restarts.
    */
   markCompletedTask(id: string): void {
+    assertNotApiProcess('TaskStore.markCompletedTask');
     const path = join(this.specsDir, 'completed-task-ids.json');
     let ids: string[] = [];
     try {
@@ -475,6 +480,7 @@ export class TaskStore {
   }
 
   delete(id: string): void {
+    assertNotApiProcess('TaskStore.delete');
     withBoardLock(this.specsDir, () => this._delete(id));
   }
 
@@ -490,6 +496,7 @@ export class TaskStore {
   // Remove pipeline artifacts at or after a given level so the pipeline can re-run from there.
   // level: 'spec' | 'plan' | 'qa'
   clearArtifacts(id: string, level: 'spec' | 'plan' | 'qa'): void {
+    assertNotApiProcess('TaskStore.clearArtifacts');
     const dir = this.getDirById(id);
     const files = PHASE_ARTIFACTS[level];
     for (const f of files) {

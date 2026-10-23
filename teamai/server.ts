@@ -14,6 +14,7 @@ import { parse } from 'url';
 import next from 'next';
 import { WebSocketServer, WebSocket } from 'ws';
 import { processManager } from './src/lib/process-manager';
+import { appEvents } from './src/lib/app-events';
 import { containerManager, checkDockerAvailable } from './src/lib/container-manager';
 import { startupCleanup, autoResumeInterruptedTasks, sweepStalledTasks } from './src/lib/recovery';
 import { restoreAutoModeStates } from './src/lib/auto-mode';
@@ -128,7 +129,7 @@ void app.prepare().then(async () => {
   // state, etc.) so every UI surface refreshes on any orchestrator-driven
   // state change — not only the phase transitions that happen when an agent
   // session starts. Carries no data beyond the taskId; consumers just re-fetch.
-  processManager.on('task-updated', (data: { taskId: string; projectRoot?: string }) => {
+  appEvents.on('task-updated', (data: { taskId: string; projectRoot?: string }) => {
     const msg = JSON.stringify({ type: 'task-updated', taskId: data.taskId });
     broadcastToProject(data, msg);
   });
