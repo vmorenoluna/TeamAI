@@ -100,12 +100,23 @@ definition in one place.
 
 ### Main Process
 
-The Electron main process manages Claude CLI subprocesses via the ProcessManager and communicates with the renderer through IPC for real-time agent event streaming and pipeline orchestration.
+TeamAI runs as two Node processes (ADR 011, `teamai/adr/011-engine-child-process.md`):
+
+- **API server** (`server.ts`, `TEAMAI_PROCESS_ROLE=api`): Next.js pages and server actions plus the WebSocket. It owns no pipeline state in memory.
+- **Engine** (`engine.ts` → `src/engine/engine-main.ts`, `TEAMAI_PROCESS_ROLE=engine`): a child process forked by the API server (`startEngine()` in `src/engine/engine-host.ts`). It owns the `processManager`, `getOrchestrator()`, auto mode (`setAutoModeState`, the tick loop, CI polling), `runInBackground()` and its result registry, `containerManager`, terminals and the role-refinement watcher, and runs the boot sequence (recovery, auto-resume, sweeps). A slow pipeline phase therefore can never block a page render, a server action or the WebSocket.
+
+**`processManager`, `getOrchestrator`, `runInBackground`, `setAutoModeState` and `containerManager` are engine-only.** Never import them into server actions, pages, components or `server.ts`. Server actions reach them through `engineCall('<area>.<method>', [params])` from `src/engine/engine-client.ts` (`engineNotify` for fire-and-forget); the logic lives in `src/engine/handlers/` (`tasks`, `orchestrator`, `background`, `auto-mode`, `terminals`, `sessions`, `containers`, `role-refinement`, merged in `handlers/index.ts`). `src/app/actions/*` files are thin wrappers that validate input, call the engine and `revalidatePath`. `engine-client.ts` imports only `protocol.ts` and types, so using it never loads the engine into the API process.
+
+**The engine is the only writer of task state** (`TaskStore` writes, `events.jsonl`, pipeline artifacts). The API process only reads `.teamai/` from disk. `src/lib/process-role.ts` enforces the boundary: `getProcessRole()` returns `api | engine | standalone` (tests, scripts), and `assertNotApiProcess(what)` throws `EngineBoundaryError` when engine-only work is attempted from the API process.
+
+**IPC:** `src/engine/protocol.ts` defines the messages (`call`/`notify`/`shutdown` to the engine; `ready`/`result`/`event` back). Engine events (`phase-change`, `action-result`, `agent-event`, `terminal-data`, `task-updated`, …) are re-emitted on `appEvents` in the API process, and `server.ts` broadcasts them over the WebSocket (`src/engine/ws-relay.ts`). If the engine crashes it is restarted and the agents it left behind are reaped; calls in flight fail with `EngineUnavailableError` and the user retries.
 
 ### ProcessManager (`src/lib/process-manager.ts`)
 Core engine. Extends `EventEmitter` and manages a `Map<string, AgentSession>`. Each session spawns a `claude -p --input-format stream-json --output-format stream-json` subprocess with piped stdio. Output is buffered and parsed line-by-line as NDJSON, then re-emitted as typed events (`event`, `error`, `exit`).
 
 Key methods: `createSession(taskId, role, cwd)`, `writeToSession(id, data)`, `terminateSession(id)` (SIGTERM).
+
+The `processManager` singleton exists only in the engine process; the API server never sees a session object. Agent output reaches the UI as forwarded `agent-event` / `agent-error` events carrying the session's task and project.
 
 Sessions are removed from the map when their process closes (30 s fallback after exit).
 
@@ -162,9 +173,9 @@ Mutations rely on the server action's `revalidatePath` — client code does not 
 
 ### Auto Mode
 
-Auto mode (`src/lib/auto-mode.ts`) automatically advances tasks through the pipeline without manual intervention: picks backlog tasks, auto-approves at `awaiting-review`, creates PRs, polls CI, and auto-merges. Enabled per-project via the UI toggle (`AutoModeButton`).
+Auto mode (`src/lib/auto-mode.ts`) automatically advances tasks through the pipeline without manual intervention: picks backlog tasks, auto-approves at `awaiting-review`, creates PRs, polls CI, and auto-merges. Enabled per-project via the UI toggle (`AutoModeButton`). Auto mode runs in the engine process: `setAutoModeState()`, the tick loop and CI polling are engine-only, and the server action reaches them through the `auto-mode.*` handlers (`src/engine/handlers/auto-mode.ts`). The API process reads state with `getAutoModeState()` (`src/lib/auto-mode-state.ts`), which only reads `.teamai/auto-mode.json` and the task store from disk, so layouts and pages render the toggle without a round trip.
 
-**State persistence:** Auto-mode state (`enabled`, `maxParallel`) is persisted to `.teamai/auto-mode.json` on every `setAutoModeState()` call. On server startup, `restoreAutoModeStates()` scans all registered projects via `projectStore.getAll()` and re-enables auto mode from disk for any project that had it on. This ensures auto mode survives server restarts — critical because rate-limit pauses can span a dev hot reload, crash, or manual restart. Without persistence, the user would have to manually re-enable auto mode in the UI after every restart.
+**State persistence:** Auto-mode state (`enabled`, `maxParallel`) is persisted to `.teamai/auto-mode.json` on every `setAutoModeState()` call. On engine startup (boot sequence, `src/engine/engine-main.ts`; so also after an engine restart), `restoreAutoModeStates()` scans all registered projects via `projectStore.getAll()` and re-enables auto mode from disk for any project that had it on. This ensures auto mode survives server restarts — critical because rate-limit pauses can span a dev hot reload, crash, or manual restart. Without persistence, the user would have to manually re-enable auto mode in the UI after every restart.
 
 **Stalled task adoption:** When auto mode is re-enabled, `_adoptStalledTasks()` scans the task store for tasks already in paused phases (`awaiting-review` or `pr-open`) and re-adopts them:
 - **`awaiting-review`**: adds to `autoApprovedIds` and immediately calls `approveTask(taskId, 'pull-request')` — the phase-change listener won't fire because the phase isn't changing.
@@ -183,9 +194,9 @@ Without this, re-enabling auto mode only picks up *future* phase-change events �
 
 ### Background Server Actions
 
-Next.js runs one client's server actions serially, so a slow action (`git worktree remove`, `gh`, Docker, a pipeline phase) blocks every other click. Slow work in `src/app/actions/` therefore **starts and returns immediately** through `runInBackground()` (`src/lib/background-actions.ts`), which returns an `operationId`; never fire-and-forget with `.catch(logError)` — a swallowed rejection turns a failure into silent success.
+Next.js runs one client's server actions serially, so a slow action (`git worktree remove`, `gh`, Docker, a pipeline phase) blocks every other click. Slow work in `src/app/actions/` therefore **starts and returns immediately**: the action calls the engine, and the engine handler starts the work through `runInBackground()` (`src/lib/background-actions.ts`, engine-only) and returns an `operationId`; never fire-and-forget with `.catch(logError)` — a swallowed rejection turns a failure into silent success.
 
-- **Result delivery:** when the work settles, `runInBackground` emits `action-result` on the process manager and `server.ts` broadcasts it over the existing WebSocket as `{type: 'action-result', operationId, action, taskId, ok, error}` (`src/lib/action-result-message.ts`). Settled results are also kept in a registry, queryable through the `getBackgroundActionResult(operationId)` server action.
+- **Result delivery:** when the work settles, `runInBackground` emits `action-result` on the engine's process manager, the engine forwards it over IPC, and `server.ts` broadcasts it over the existing WebSocket as `{type: 'action-result', operationId, action, taskId, ok, error}` (`src/lib/action-result-message.ts`). Settled results are also kept in an in-memory registry **in the engine** (the work settles there), queryable through the `getBackgroundActionResult(operationId)` server action, whose logic is the engine's `background.getResult` handler (`src/engine/handlers/background.ts`). The `isBackgroundPending` duplicate guards (approve / mark-done / stop / delete-worktree) are likewise checked in the engine. The registry is in-memory, so an engine restart loses it; calls in flight at the crash fail with `EngineUnavailableError`.
 - **`notify` modes:** `always` for operations a component tracks (success and failure are both reported); `failure-only` for untracked fire-and-forget calls (only a failure is reported).
 - **Client side:** `src/lib/background-action-client.ts` is a client-only registry of the operations this tab started. Components call `useBackgroundAction()` (`src/hooks/use-background-action.ts`), whose `start()` tracks the id *before* invoking the action (the result can beat the HTTP response) and resolves with `{ok, error}`. The global `BackgroundActionFailureBanner` (mounted in `layout.tsx`) receives every `action-result`, settles tracked operations, and shows any *unclaimed* failure itself. It recovers missed results (socket gap, reconnect) by polling `getBackgroundActionResult` for still-pending ids. `use-phase-sync` refreshes the UI on `action-result`.
 - **Failure and Retry:** a rejected pipeline-phase operation leaves the task in `failed`, so the single Retry action (`retryTask`) resumes it at the recorded phase. This includes approval: if the merge/create-pr phase fails after `approveTask`, the failure goes through `_handleRunFailure` and the task lands in `failed`. Do not add per-operation retry buttons.
@@ -224,7 +235,7 @@ The Role Refinement Assistant (`src/lib/role-refinement.ts`) investigates *faile
 **Key files:** `src/lib/role-refinement.ts` (config, store, signature, recurrence detection, analyzer, apply/dismiss/revert, eligibility), `src/lib/role-refinement-watcher.ts` (boot-time listener, auto gates, auto-apply), `src/lib/task-retry.ts` (shared retry path), `src/components/role-refinement-card.tsx` (inline card + escalation banner), `src/components/role-refinement-settings.tsx` (mode, analysis model, autoApply, spend cap, history), `defaults/commands/role-refinement-analysis.md` (internal analysis command).
 ### Retry Flow (`retryTask`)
 
-When a task fails (phase = `failed`), the user clicks **Retry** to restart the pipeline from where it left off. The retry logic lives in `src/app/actions/tasks.ts` → `retryTask()`.
+When a task fails (phase = `failed`), the user clicks **Retry** to restart the pipeline from where it left off. The `retryTask` server action in `src/app/actions/tasks.ts` is a thin wrapper that calls `engineCall('tasks.retryTask', …)`; the retry logic lives in the engine handler `retryTask()` in `src/engine/handlers/tasks.ts` (the role-refinement auto-retry calls the same handler). The stalled-auto-merge retry (`retryAutoMerge`, `src/lib/auto-mode.ts`) also runs in the engine.
 
 **Resume phase determination:** `retryTask` reads the task's `events.jsonl` (phase-change history) and calls `getResumePhaseForFailedTask()` in `src/lib/task-utils.ts`. This function:
 1. Filters out `backlog`, `failed`, and `done` phases from the event chain
