@@ -48,8 +48,8 @@ vi.mock('@/lib/process-manager', () => ({
   containerSessionOpts: (projectRoot: string) => ({ projectRoot, permissionMode: 'bypassPermissions' as const }),
 }));
 vi.mock('@/lib/logger', () => ({ log: vi.fn(), warn: vi.fn(), error: vi.fn() }));
+vi.mock('@/engine/engine-client', () => ({ engineCall: vi.fn(async () => []) }));
 vi.mock('@/lib/orchestrator', () => ({
-  getOrchestrator: vi.fn(() => ({ isTaskActive: vi.fn(() => false) })),
   detectDefaultBranch: vi.fn(async () => 'main'),
 }));
 
@@ -61,6 +61,7 @@ import {
   getTasks, getTask, getTaskEvents, getTaskArtifacts, getTaskFull,
 } from '@/app/actions/tasks';
 import { getWorkflowTasks } from '@/app/actions/workflow';
+import { engineCall } from '@/engine/engine-client';
 import { getAnalytics } from '@/app/actions/analytics';
 import { getTaskReferences } from '@/app/actions/references';
 
@@ -235,5 +236,29 @@ describe('request-path reads return unchanged results (AC5)', () => {
   it('getTaskReferences lists only image files, sorted', async () => {
     await expect(getTaskReferences(ID_A)).resolves.toEqual(['ref-a.jpg', 'ref-b.png']);
     await expect(getTaskReferences(ID_B)).resolves.toEqual([]);
+  }, 30_000);
+});
+
+describe('getWorkflowTasks — activity comes from the engine', () => {
+  it('asks the engine for active task ids with a 5000 ms timeout and marks those tasks active', async () => {
+    vi.mocked(engineCall).mockResolvedValueOnce([ID_A]);
+
+    const tasks = await getWorkflowTasks();
+
+    expect(engineCall).toHaveBeenLastCalledWith('orchestrator.getActiveTaskIds', [{ projectPath: root }], { timeoutMs: 5000 });
+    expect(tasks.find(t => t.task.id === ID_A)?.isActive).toBe(true);
+    expect(tasks.find(t => t.task.id === ID_B)?.isActive).toBe(false);
+  }, 30_000);
+
+  it('reports every task idle when the engine call fails or times out', async () => {
+    vi.mocked(engineCall).mockRejectedValueOnce(new Error('Engine call timed out'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const tasks = await getWorkflowTasks();
+
+    expect(tasks).toHaveLength(2);
+    expect(tasks.every(t => t.isActive === false)).toBe(true);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
   }, 30_000);
 });

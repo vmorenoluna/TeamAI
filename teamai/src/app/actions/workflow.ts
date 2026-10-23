@@ -2,7 +2,7 @@
 
 import { TaskStore } from '@/lib/task-store';
 import { getActiveProjectPath } from './projects';
-import { getOrchestrator } from '@/lib/orchestrator';
+import { engineCall } from '@/engine/engine-client';
 import type { Task } from '@/lib/task-store';
 
 export interface WorkflowTask {
@@ -14,11 +14,21 @@ export interface WorkflowTask {
   isActive: boolean;
 }
 
+const ACTIVE_IDS_TIMEOUT_MS = 5000;
+
 export async function getWorkflowTasks(): Promise<WorkflowTask[]> {
   const projectPath = await getActiveProjectPath();
   const taskStore = new TaskStore(projectPath);
   const tasks = await taskStore.getAllAsync();
-  const orchestrator = getOrchestrator(projectPath);
+
+  // Activity is advisory: when the engine is unavailable or slow, report every task idle
+  // rather than failing the whole workflow view.
+  let activeIds = new Set<string>();
+  try {
+    activeIds = new Set(await engineCall<string[]>('orchestrator.getActiveTaskIds', [{ projectPath }], { timeoutMs: ACTIVE_IDS_TIMEOUT_MS }));
+  } catch (err) {
+    console.error('[workflow] could not read active task ids from the engine:', err);
+  }
 
   return Promise.all(tasks.map(async task => {
     const events = await taskStore.getEventsAsync(task.id);
@@ -32,6 +42,6 @@ export async function getWorkflowTasks(): Promise<WorkflowTask[]> {
       ? phaseEvents[phaseEvents.length - 1].timestamp
       : null;
 
-    return { task, qaBounces, enteredPhaseAt, isActive: orchestrator.isTaskActive(task.id) };
+    return { task, qaBounces, enteredPhaseAt, isActive: activeIds.has(task.id) };
   }));
 }

@@ -285,8 +285,9 @@ describe('retryTask — restores human_feedback.md from snapshot', () => {
     store.getEvents.mockReturnValue([]);
     store.getDirById.mockReturnValue(taskDir);
 
-    // Import retryTask from actions
-    const { retryTask } = await import('@/app/actions/tasks');
+    // The retry logic runs in the engine's tasks.retryTask handler
+    const { tasksHandlers } = await import('@/engine/handlers/tasks');
+    const retryTask = (id: string) => tasksHandlers['tasks.retryTask']({ projectPath: testDir, taskId: id });
 
     // Spy on moveTaskToPhase so the pipeline doesn't actually run
     const moveSpy = vi.spyOn(orch, 'moveTaskToPhase').mockResolvedValue(undefined);
@@ -314,7 +315,8 @@ describe('retryTask — restores human_feedback.md from snapshot', () => {
     store.getEvents.mockReturnValue([]);
     store.getDirById.mockReturnValue(taskDir);
 
-    const { retryTask } = await import('@/app/actions/tasks');
+    const { tasksHandlers } = await import('@/engine/handlers/tasks');
+    const retryTask = (id: string) => tasksHandlers['tasks.retryTask']({ projectPath: testDir, taskId: id });
     const moveSpy = vi.spyOn(orch, 'moveTaskToPhase').mockResolvedValue(undefined);
 
     await retryTask(taskId);
