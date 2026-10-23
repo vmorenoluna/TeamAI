@@ -5,6 +5,8 @@
  * Used by server components (layout.tsx) that only need to know whether auto
  * mode is enabled — not to start/stop it.
  */
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
 import { TaskStore } from './task-store';
 import { TERMINAL_PHASES } from '@/constants/phases';
 
@@ -38,14 +40,31 @@ export function isAutoModeEnabled(projectRoot: string): boolean {
   return getProjectStates().get(projectRoot)?.enabled ?? false;
 }
 
+/**
+ * The auto-mode runner lives in the engine process, so the API process reads the
+ * persisted `.teamai/auto-mode.json` rather than an in-memory map. Never throws:
+ * this runs on every layout render.
+ */
+function readPersistedState(projectRoot: string): { enabled: boolean; maxParallel: number } {
+  try {
+    const p = join(projectRoot, '.teamai', 'auto-mode.json');
+    if (!existsSync(p)) return { enabled: false, maxParallel: 1 };
+    const parsed = JSON.parse(readFileSync(p, 'utf-8')) as Partial<AutoProjectState>;
+    return {
+      enabled: parsed.enabled === true,
+      maxParallel: typeof parsed.maxParallel === 'number' && parsed.maxParallel >= 1 ? parsed.maxParallel : 1,
+    };
+  } catch {
+    return { enabled: false, maxParallel: 1 };
+  }
+}
+
 export function getAutoModeState(projectRoot: string): {
   enabled: boolean;
   maxParallel: number;
   activeCount: number;
 } {
-  const state = getProjectStates().get(projectRoot);
-  const enabled = state?.enabled ?? false;
-  const maxParallel = state?.maxParallel ?? 1;
+  const { enabled, maxParallel } = readPersistedState(projectRoot);
   let activeCount = 0;
   try {
     const taskStore = new TaskStore(projectRoot);
