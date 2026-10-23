@@ -2,55 +2,28 @@
 
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
-import { TaskStore } from '@/lib/task-store';
 import {
   getRoleRefinementConfig,
-  setRoleRefinementConfig,
-  analyzeFailure,
   listSuggestions,
   getSuggestion,
   suggestionsForTask,
-  applyRefinement,
-  dismissRefinement,
-  revertRefinement,
-  makeRoleRefinementAnalyzeDeps,
   type RoleRefinementConfig,
   type RoleRefinementSuggestion,
 } from '@/lib/role-refinement';
-import { retryTask } from './tasks';
-import { error as logError } from '@/lib/logger';
-import { runInBackground } from '@/lib/background-actions';
+import { engineCall } from '@/engine/engine-client';
 
 /** Start a manual failure analysis (fire-and-forget). Guards mode !== 'off' and phase === 'failed'. */
 export async function analyzeFailedTask(taskId: string, operationId?: string): Promise<{ success: boolean; error?: string; operationId?: string }> {
   const projectPath = await getActiveProjectPath();
-  const config = getRoleRefinementConfig(projectPath);
-  if (config.mode === 'off') {
-    return { success: false, error: 'Role refinement is disabled for this project (Settings → Role Refinements)' };
-  }
-  const taskStore = new TaskStore(projectPath);
-  let task;
-  try {
-    task = await taskStore.getByIdAsync(taskId);
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : 'Failed to read task' };
-  }
-  if (!task) return { success: false, error: 'Task not found' };
-  if (task.phase !== 'failed') {
-    return { success: false, error: `Task is in phase "${task.phase}", not "failed"` };
-  }
-
-  // Stamp 'analyzing' synchronously so the UI shows the spinner immediately,
-  // then run the analysis in the background.
-  taskStore.update(taskId, { refinementStatus: 'analyzing' });
-  revalidatePath('/');
-  revalidatePath(`/task/${taskId}`);
-
-  const opId = runInBackground(
-    { operationId, action: 'analyze-failure', taskId, projectRoot: projectPath, notify: 'failure-only' },
-    () => analyzeFailure(projectPath, taskId, 'manual', makeRoleRefinementAnalyzeDeps()),
+  const result = await engineCall<{ success: boolean; error?: string; operationId?: string }>(
+    'roleRefinement.analyzeFailedTask', [{ projectPath, taskId, operationId }],
   );
-  return { success: true, operationId: opId };
+  // The engine stamps refinementStatus 'analyzing' before returning.
+  if (result.success) {
+    revalidatePath('/');
+    revalidatePath(`/task/${taskId}`);
+  }
+  return result;
 }
 
 export async function getRoleRefinementConfigAction(): Promise<RoleRefinementConfig> {
@@ -60,7 +33,7 @@ export async function getRoleRefinementConfigAction(): Promise<RoleRefinementCon
 
 export async function setRoleRefinementConfigAction(cfg: RoleRefinementConfig): Promise<void> {
   const projectPath = await getActiveProjectPath();
-  setRoleRefinementConfig(projectPath, cfg);
+  await engineCall<void>('roleRefinement.setRoleRefinementConfigAction', [{ projectPath, cfg }]);
   revalidatePath('/');
   revalidatePath('/settings');
 }
@@ -85,15 +58,14 @@ export async function applyRefinementAction(
   overrides?: Record<string, string>,
 ): Promise<{ success: boolean; error?: string }> {
   const projectPath = await getActiveProjectPath();
-  try {
-    applyRefinement(projectPath, suggestionId, overrides);
-    revalidatePath('/');
-    revalidatePath('/settings');
-    revalidatePath(`/task/${getSourceTaskId(projectPath, suggestionId)}`);
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : 'Failed to apply refinement' };
-  }
+  const result = await engineCall<{ success: boolean; error?: string; sourceTaskId?: string | null }>(
+    'roleRefinement.applyRefinementAction', [{ projectPath, suggestionId, overrides }],
+  );
+  if (!result.success) return { success: false, error: result.error };
+  revalidatePath('/');
+  revalidatePath('/settings');
+  revalidatePath(`/task/${result.sourceTaskId ?? null}`);
+  return { success: true };
 }
 
 /** Apply, then retry the source task (human-in-the-loop validation). */
@@ -102,49 +74,34 @@ export async function applyAndRetryRefinementAction(
   overrides?: Record<string, string>,
 ): Promise<{ success: boolean; error?: string }> {
   const projectPath = await getActiveProjectPath();
-  const applied = await applyRefinementAction(suggestionId, overrides);
-  if (!applied.success) return applied;
-  const taskId = getSourceTaskId(projectPath, suggestionId);
-  if (!taskId) return { success: false, error: 'Suggestion has no source task' };
-  const retry = await retryTask(taskId);
-  if (retry.success) {
-    try {
-      const taskStore = new TaskStore(projectPath);
-      const task = await taskStore.getByIdAsync(taskId);
-      if (task) {
-        taskStore.update(taskId, { refinementRetryCount: (task.refinementRetryCount ?? 0) + 1 });
-      }
-    } catch (err) { logError('role-refinement', 'Failed to bump refinementRetryCount', err); }
-  }
-  return retry;
+  const result = await engineCall<{ success: boolean; error?: string }>(
+    'roleRefinement.applyAndRetryRefinementAction', [{ projectPath, suggestionId, overrides }],
+  );
+  revalidatePath('/');
+  revalidatePath('/settings');
+  return result;
 }
 
 export async function dismissRefinementAction(suggestionId: string): Promise<{ success: boolean; error?: string }> {
   const projectPath = await getActiveProjectPath();
-  try {
-    dismissRefinement(projectPath, suggestionId);
+  const result = await engineCall<{ success: boolean; error?: string }>(
+    'roleRefinement.dismissRefinementAction', [{ projectPath, suggestionId }],
+  );
+  if (result.success) {
     revalidatePath('/');
     revalidatePath('/settings');
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : 'Failed to dismiss refinement' };
   }
+  return result;
 }
 
 export async function revertRefinementAction(suggestionId: string): Promise<{ success: boolean; error?: string }> {
   const projectPath = await getActiveProjectPath();
-  try {
-    revertRefinement(projectPath, suggestionId);
+  const result = await engineCall<{ success: boolean; error?: string }>(
+    'roleRefinement.revertRefinementAction', [{ projectPath, suggestionId }],
+  );
+  if (result.success) {
     revalidatePath('/');
     revalidatePath('/settings');
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : 'Failed to revert refinement' };
   }
-}
-
-/** First source task id of a suggestion (used for revalidate path targeting). */
-function getSourceTaskId(projectPath: string, suggestionId: string): string | null {
-  const record = getSuggestion(projectPath, suggestionId);
-  return record?.sourceTaskIds?.[0] ?? null;
+  return result;
 }

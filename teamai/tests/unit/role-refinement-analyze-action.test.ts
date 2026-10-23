@@ -1,57 +1,83 @@
 // @vitest-environment node
 
-/** analyzeFailedTask must resolve { success: false, error } (never reject, never
- *  success) when its TaskStore read rejects. */
+/** Role-refinement mutating actions are thin engine wrappers; read helpers stay local. */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockGetByIdAsync, mockUpdate, mockAnalyzeFailure } = vi.hoisted(() => ({
-  mockGetByIdAsync: vi.fn(),
-  mockUpdate: vi.fn(),
-  mockAnalyzeFailure: vi.fn(),
+const { engineCall, mockListSuggestions } = vi.hoisted(() => ({
+  engineCall: vi.fn(),
+  mockListSuggestions: vi.fn(),
 }));
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 vi.mock('@/app/actions/projects', () => ({ getActiveProjectPath: vi.fn(async () => '/proj') }));
-vi.mock('@/app/actions/tasks', () => ({ retryTask: vi.fn() }));
-vi.mock('@/lib/logger', () => ({ log: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn() }));
-vi.mock('@/lib/task-store', () => ({
-  TaskStore: class {
-    getByIdAsync = mockGetByIdAsync;
-    update = mockUpdate;
-  },
-}));
+vi.mock('@/engine/engine-client', () => ({ engineCall }));
 vi.mock('@/lib/role-refinement', () => ({
   getRoleRefinementConfig: vi.fn(() => ({ mode: 'manual' })),
-  setRoleRefinementConfig: vi.fn(),
-  analyzeFailure: mockAnalyzeFailure,
-  listSuggestions: vi.fn(),
+  listSuggestions: mockListSuggestions,
   getSuggestion: vi.fn(),
   suggestionsForTask: vi.fn(),
-  applyRefinement: vi.fn(),
-  dismissRefinement: vi.fn(),
-  revertRefinement: vi.fn(),
-  makeRoleRefinementAnalyzeDeps: vi.fn(() => ({})),
 }));
 
-import { analyzeFailedTask } from '@/app/actions/role-refinement';
+import { revalidatePath } from 'next/cache';
+import {
+  analyzeFailedTask, setRoleRefinementConfigAction, applyRefinementAction,
+  applyAndRetryRefinementAction, dismissRefinementAction, revertRefinementAction,
+  getRefinementSuggestions,
+} from '@/app/actions/role-refinement';
 
-describe('analyzeFailedTask TaskStore read failures', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockAnalyzeFailure.mockResolvedValue(undefined);
+describe('role-refinement action wrappers', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('analyzeFailedTask forwards to the engine and revalidates on success', async () => {
+    engineCall.mockResolvedValue({ success: true, operationId: 'op' });
+    await expect(analyzeFailedTask('t1', 'op')).resolves.toEqual({ success: true, operationId: 'op' });
+    expect(engineCall).toHaveBeenCalledWith('roleRefinement.analyzeFailedTask', [{ projectPath: '/proj', taskId: 't1', operationId: 'op' }]);
+    expect(revalidatePath).toHaveBeenCalledWith('/');
+    expect(revalidatePath).toHaveBeenCalledWith('/task/t1');
   });
 
-  it('resolves { success: false, error } when the read rejects', async () => {
-    mockGetByIdAsync.mockRejectedValue(new Error('EIO: read failed'));
+  it('analyzeFailedTask passes through an engine { success: false } without revalidating', async () => {
+    engineCall.mockResolvedValue({ success: false, error: 'EIO: read failed' });
     await expect(analyzeFailedTask('t1')).resolves.toEqual({ success: false, error: 'EIO: read failed' });
-    expect(mockUpdate).not.toHaveBeenCalled();
-    expect(mockAnalyzeFailure).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 
-  it('succeeds and starts the analysis when the task is failed', async () => {
-    mockGetByIdAsync.mockResolvedValue({ id: 't1', phase: 'failed' });
-    await expect(analyzeFailedTask('t1')).resolves.toEqual({ success: true, operationId: expect.any(String) });
-    expect(mockUpdate).toHaveBeenCalledWith('t1', { refinementStatus: 'analyzing' });
+  it('setRoleRefinementConfigAction forwards cfg and revalidates', async () => {
+    engineCall.mockResolvedValue(undefined);
+    const cfg = { mode: 'auto' } as never;
+    await setRoleRefinementConfigAction(cfg);
+    expect(engineCall).toHaveBeenCalledWith('roleRefinement.setRoleRefinementConfigAction', [{ projectPath: '/proj', cfg }]);
+    expect(revalidatePath).toHaveBeenCalledWith('/settings');
+  });
+
+  it('applyRefinementAction revalidates the source task path from the engine result', async () => {
+    engineCall.mockResolvedValue({ success: true, sourceTaskId: 't9' });
+    await expect(applyRefinementAction('s1', { a: 'b' })).resolves.toEqual({ success: true });
+    expect(engineCall).toHaveBeenCalledWith('roleRefinement.applyRefinementAction', [{ projectPath: '/proj', suggestionId: 's1', overrides: { a: 'b' } }]);
+    expect(revalidatePath).toHaveBeenCalledWith('/task/t9');
+  });
+
+  it('applyRefinementAction returns the engine error without revalidating', async () => {
+    engineCall.mockResolvedValue({ success: false, error: 'nope' });
+    await expect(applyRefinementAction('s1')).resolves.toEqual({ success: false, error: 'nope' });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('applyAndRetryRefinementAction, dismiss and revert forward to the engine', async () => {
+    engineCall.mockResolvedValue({ success: true });
+    await expect(applyAndRetryRefinementAction('s1')).resolves.toEqual({ success: true });
+    expect(engineCall).toHaveBeenLastCalledWith('roleRefinement.applyAndRetryRefinementAction', [{ projectPath: '/proj', suggestionId: 's1', overrides: undefined }]);
+    await dismissRefinementAction('s1');
+    expect(engineCall).toHaveBeenLastCalledWith('roleRefinement.dismissRefinementAction', [{ projectPath: '/proj', suggestionId: 's1' }]);
+    await revertRefinementAction('s1');
+    expect(engineCall).toHaveBeenLastCalledWith('roleRefinement.revertRefinementAction', [{ projectPath: '/proj', suggestionId: 's1' }]);
+  });
+
+  it('read helpers stay local and do not call the engine', async () => {
+    mockListSuggestions.mockReturnValue([]);
+    await expect(getRefinementSuggestions()).resolves.toEqual([]);
+    expect(mockListSuggestions).toHaveBeenCalledWith('/proj');
+    expect(engineCall).not.toHaveBeenCalled();
   });
 });

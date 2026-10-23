@@ -1,8 +1,16 @@
 'use server';
 
-import { getBackgroundResult, type BackgroundResult } from '@/lib/background-actions';
+import type { BackgroundResult } from '@/lib/background-actions';
+import { engineCall } from '@/engine/engine-client';
+import { EngineUnavailableError } from '@/engine/protocol';
 
-/** Lets the UI recover an `action-result` it missed (socket gap, reconnect). */
+/** Lets the UI recover an `action-result` it missed (socket gap, reconnect).
+ *  The registry lives in the engine process; when it is down the result is unknown. */
 export async function getBackgroundActionResult(operationId: string): Promise<BackgroundResult> {
-  return getBackgroundResult(operationId);
+  try {
+    return await engineCall<BackgroundResult>('background.getResult', [{ operationId }]);
+  } catch (err) {
+    if (err instanceof EngineUnavailableError) return { status: 'unknown' };
+    throw err;
+  }
 }
