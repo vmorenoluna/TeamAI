@@ -101,12 +101,15 @@ export function WorkflowView({ workflowTasks: workflowTasksProp, projectPath }: 
   // (adjust-state-during-render) and patched by WebSocket-driven re-fetches.
   const [workflowTasks, setWorkflowTasks] = useState(workflowTasksProp);
   const [prevProp, setPrevProp] = useState(workflowTasksProp);
+  const resyncRequestIdRef = useRef(0);
   if (prevProp !== workflowTasksProp) {
     setPrevProp(workflowTasksProp);
     setWorkflowTasks(workflowTasksProp);
+    // Invalidate any in-flight re-sync so a stale response can't overwrite the fresh prop.
+    // eslint-disable-next-line react-hooks/refs
+    resyncRequestIdRef.current++;
   }
 
-  const resyncRequestIdRef = useRef(0);
   const handleResync = useCallback((changedTaskIds: string[] | null) => {
     // null = WebSocket reconnect: usePhaseSync already router.refresh()ed, which replaces the prop.
     if (changedTaskIds === null) return;

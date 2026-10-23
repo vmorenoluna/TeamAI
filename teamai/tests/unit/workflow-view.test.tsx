@@ -385,5 +385,17 @@ describe('WorkflowView', () => {
       ]} />);
       expect(screen.queryByText(/No tickets yet/)).not.toBeInTheDocument();
     });
+
+    it('ignores an in-flight re-sync response after the workflowTasks prop changes', async () => {
+      let resolveStale!: (v: WorkflowTask[]) => void;
+      vi.mocked(getWorkflowTasks).mockImplementationOnce(() => new Promise(r => { resolveStale = r; }));
+      const { rerender } = render(<WorkflowView projectPath="/test" workflowTasks={[]} />);
+      await act(async () => { captureOnResync()(['a']); });
+      rerender(<WorkflowView projectPath="/test" workflowTasks={[
+        makeWorkflowTask({ task: { id: 'p', title: 'Fresh prop task', phase: 'backlog' } }),
+      ]} />);
+      await act(async () => { resolveStale([]); });
+      expect(screen.queryByText(/No tickets yet/)).not.toBeInTheDocument();
+    });
   });
 });
