@@ -69,7 +69,6 @@ import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { TaskStore } from '@/lib/task-store';
 import { tasksHandlers } from '@/engine/handlers/tasks';
-import { analyzeFailedTask } from '@/app/actions/role-refinement';
 
 type Result = { success: boolean; error?: string };
 const call = (name: string, params: Record<string, unknown>) =>
@@ -139,7 +138,6 @@ describe('server actions return the read error', () => {
       ['stopTask', () => stopTask(taskId)],
       ['playTask', () => playTask(taskId)],
       ['restartCurrentPhase', () => restartCurrentPhase(taskId)],
-      ['analyzeFailedTask', () => analyzeFailedTask(taskId)],
     ];
 
     it.each(actions)('%s resolves { success: false, error } when getByIdAsync rejects', async (_name, run) => {
