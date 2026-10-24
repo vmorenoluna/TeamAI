@@ -1,6 +1,6 @@
 {
   "name": "teamai",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Multi-agent Claude Code CLI orchestration with a browser UI",
   "license": "MIT",
   "author": "TeamAI",
