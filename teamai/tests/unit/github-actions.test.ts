@@ -4,7 +4,7 @@
  * Tests cover startIssueList() (session creation, prompt), parseIssuesFromText()
  * (JSON parsing, edge cases), saveIssuesToFile() (persistence), and
  * importIssues() (kanban task creation). Uses createTestProject() helper
- * and mocked processManager / TaskStore.
+ * and mocked engine client / TaskStore.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -14,20 +14,30 @@ import type { GitHubIssue } from '@/app/actions/github';
 
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
 
+const mockEngineOpts = vi.fn();
 const mockCreateSession = vi.fn();
 const mockSendMessage = vi.fn();
 const mockGetSession = vi.fn();
 const mockKillSession = vi.fn();
 
-vi.mock('@/lib/process-manager', () => ({
-  processManager: {
-    createSession: (...args: unknown[]) => mockCreateSession(...args),
-    sendMessage: (...args: unknown[]) => mockSendMessage(...args),
-    getSession: (...args: unknown[]) => mockGetSession(...args),
-    killSession: (...args: unknown[]) => mockKillSession(...args),
-    emit: vi.fn(),
+vi.mock('@/engine/engine-client', () => ({
+  engineCall: async (method: string, args: unknown[] = [], opts?: { timeoutMs?: number }) => {
+    mockEngineOpts(method, opts);
+    const p = args[0] as any;
+    switch (method) {
+      case 'sessions.create': return mockCreateSession(p);
+      case 'sessions.send': return mockSendMessage(p.sessionId, p.message);
+      case 'sessions.kill': return mockKillSession(p.sessionId);
+      case 'sessions.get': return mockGetSession(p.sessionId);
+      case 'tasks.createTasks': {
+        const { TaskStore } = await import('@/lib/task-store');
+        const store = new TaskStore(p.projectPath);
+        for (const t of p.tasks) store.create(t.id, t.title, t.description, t.source, t.competitive_context);
+        return { ids: p.tasks.map((t: { id: string }) => t.id) };
+      }
+      default: throw new Error(`unexpected engine method ${method}`);
+    }
   },
-  containerSessionOpts: (projectRoot: string) => ({ projectRoot, permissionMode: 'bypassPermissions' as const }),
 }));
 
 const mockGetActiveProjectPath = vi.fn();
@@ -140,8 +150,7 @@ describe('GitHub server actions', () => {
         taskId: `github::${root}`,
         role: 'general',
         cwd: root,
-        projectRoot: root,
-        permissionMode: 'bypassPermissions',
+        projectPath: root,
       });
     });
 

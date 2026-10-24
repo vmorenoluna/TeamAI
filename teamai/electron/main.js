@@ -80,7 +80,7 @@ function startServer() {
     // In dev mode, use tsx watch for HMR; in production, run compiled JS.
     // Pass --with-demo in dev so the demo project is visible for development.
     const args = isDev
-      ? [path.join(projectRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'), 'watch', path.join(projectRoot, 'server.ts'), '--with-demo']
+      ? [path.join(projectRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'), 'watch', '--include', 'engine.ts', '--include', 'src/lib/**/*.ts', '--include', 'src/engine/**/*.ts', path.join(projectRoot, 'server.ts'), '--with-demo']
       : [serverEntry];
 
     console.log(`[electron] Starting server: ${args.join(' ')} (cwd: ${unpackedRoot})`);

@@ -3,7 +3,7 @@
  *
  * Tests cover startIdeationScan() (session creation, /ideation command)
  * and getIdeationReports() (directory listing, empty/missing directory).
- * Uses createTestProject() helper and mocked processManager.
+ * Uses createTestProject() helper and mocked engine client.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -13,15 +13,24 @@ import { join } from 'path';
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
 
 const renderFailure = vi.hoisted(() => ({ error: null as Error | null }));
+const mockGetSession = vi.fn();
+const mockKillSession = vi.fn();
+const mockEngineOpts = vi.fn();
 const mockCreateSession = vi.fn();
 const mockSendMessage = vi.fn();
 
-vi.mock('@/lib/process-manager', () => ({
-  processManager: {
-    createSession: (...args: unknown[]) => mockCreateSession(...args),
-    sendMessage: (...args: unknown[]) => mockSendMessage(...args),
+vi.mock('@/engine/engine-client', () => ({
+  engineCall: async (method: string, args: unknown[] = [], opts?: { timeoutMs?: number }) => {
+    mockEngineOpts(method, opts);
+    const p = args[0] as any;
+    switch (method) {
+      case 'sessions.create': return mockCreateSession(p);
+      case 'sessions.send': return mockSendMessage(p.sessionId, p.message);
+      case 'sessions.kill': return mockKillSession(p.sessionId);
+      case 'sessions.get': return mockGetSession(p.sessionId);
+      default: throw new Error(`unexpected engine method ${method}`);
+    }
   },
-  containerSessionOpts: (projectRoot: string) => ({ projectRoot, permissionMode: 'bypassPermissions' as const }),
 }));
 
 vi.mock('@/lib/command-templates', async () => {
@@ -92,8 +101,7 @@ describe('ideation server actions', () => {
         cwd: root,
         // Resolved from the shipped defaults/providers.json exploration model
         model: 'claude-sonnet-5',
-        projectRoot: root,
-        permissionMode: 'bypassPermissions',
+        projectPath: root,
       });
       expect(mockSendMessage).toHaveBeenCalledWith('session-ideation', renderCommand('ideation', ''));
       expect(mockSendMessage.mock.calls[0][1].startsWith('/')).toBe(false);

@@ -1,7 +1,6 @@
 'use server';
 
-import { processManager, containerSessionOpts } from '@/lib/process-manager';
-import { TaskStore } from '@/lib/task-store';
+import { engineCall } from '@/engine/engine-client';
 import { getActiveProjectPath } from './projects';
 import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'crypto';
@@ -32,12 +31,12 @@ export interface GitHubIssue {
  */
 export async function startIssueList(): Promise<string> {
   const projectPath = await getActiveProjectPath();
-  const sessionId = await processManager.createSession({
+  const sessionId = await engineCall<string>('sessions.create', [{
+    projectPath,
     taskId: `github::${projectPath}`,
     role: 'general',
     cwd: projectPath,
-    ...containerSessionOpts(projectPath),
-  });
+  }]);
   sessions.set(projectPath, sessionId);
 
   const prompt = [
@@ -49,7 +48,7 @@ export async function startIssueList(): Promise<string> {
     'If no issues are found or the GitHub MCP server is not available, output an empty array [].',
   ].join('\n');
 
-  processManager.sendMessage(sessionId, prompt);
+  await engineCall('sessions.send', [{ sessionId, message: prompt }]);
   return sessionId;
 }
 
@@ -130,8 +129,7 @@ export async function importIssues(
   issues: GitHubIssue[]
 ): Promise<{ taskIds: string[] }> {
   const projectPath = await getActiveProjectPath();
-  const taskStore = new TaskStore(projectPath);
-  const taskIds: string[] = [];
+  const tasks: { id: string; title: string; description: string }[] = [];
 
   for (const issue of issues) {
     const id = randomUUID();
@@ -144,9 +142,9 @@ export async function importIssues(
       `**Labels:** ${issue.labels.join(', ') || 'none'}`,
       `**URL:** ${issue.html_url}`,
     ].join('\n');
-    taskStore.create(id, issue.title, description);
-    taskIds.push(id);
+    tasks.push({ id, title: issue.title, description });
   }
+  const { ids: taskIds } = await engineCall<{ ids: string[] }>('tasks.createTasks', [{ projectPath, tasks }]);
 
   revalidatePath('/');
   return { taskIds };
@@ -157,7 +155,7 @@ export async function cancelGithubIssueListing(): Promise<void> {
   const projectPath = await getActiveProjectPath();
   const sessionId = sessions.get(projectPath);
   if (sessionId) {
-    processManager.killSession(sessionId);
+    await engineCall('sessions.kill', [{ sessionId }]);
     sessions.delete(projectPath);
   }
 }
@@ -169,7 +167,11 @@ export async function getActiveIssueSession(): Promise<string | null> {
   const projectPath = await getActiveProjectPath();
   const sessionId = sessions.get(projectPath);
   if (!sessionId) return null;
-  const session = processManager.getSession(sessionId);
-  if (session && session.status === 'running') return sessionId;
+  try {
+    const session = await engineCall<{ status: string } | null>('sessions.get', [{ sessionId }], { timeoutMs: 5000 });
+    if (session && session.status === 'running') return sessionId;
+  } catch {
+    // engine unavailable or slow: treat as not running
+  }
   return null;
 }

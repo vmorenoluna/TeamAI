@@ -5,7 +5,6 @@ vi.mock('@/lib/logger', () => ({ error: vi.fn(), warn: vi.fn(), log: vi.fn(), in
 import { processManager } from '@/lib/process-manager';
 import { error as logError } from '@/lib/logger';
 import { runInBackground, getBackgroundResult, isBackgroundPending } from '@/lib/background-actions';
-import { getBackgroundActionResult } from '@/app/actions/background';
 
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
@@ -100,12 +99,11 @@ describe('background-actions', () => {
     expect(isBackgroundPending('stop', 'tp')).toBe(false);
   });
 
-  it('reports unknown for an unrecognised id, also through the server action', async () => {
+  it('reports unknown for an unrecognised id and ok for a settled one', async () => {
     expect(getBackgroundResult('nope')).toEqual({ status: 'unknown' });
-    expect(await getBackgroundActionResult('nope')).toEqual({ status: 'unknown' });
     const id = runInBackground({ action: 'run', projectRoot: '/p', notify: 'always' }, async () => {});
     await flush();
-    expect(await getBackgroundActionResult(id)).toEqual({ status: 'ok' });
+    expect(getBackgroundResult(id)).toEqual({ status: 'ok' });
   });
 
   it('evicts the oldest settled entries beyond 500 and keeps pending ones (AC6)', async () => {

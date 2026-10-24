@@ -15,7 +15,7 @@
   "private": true,
   "main": "electron/main.js",
   "scripts": {
-    "dev": "cross-env PORT=3002 tsx watch server.ts",
+    "dev": "cross-env PORT=3002 tsx watch --include \"engine.ts\" --include \"src/lib/**/*.ts\" --include \"src/engine/**/*.ts\" server.ts",
     "build": "next build",
     "build:server": "node scripts/build-server.mjs",
     "build:electron": "npm run build && node scripts/fix-external-symlinks.mjs && npm run build:server",

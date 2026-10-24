@@ -5,6 +5,7 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import { warn as logWarn, log } from './logger';
 import { getToolPath } from './tool-checker';
+import { assertNotApiProcess } from './process-role';
 import { logToOutput } from './orchestrator/helpers';
 
 const execFileAsync = (file: string, args: string[], opts: { timeout?: number } = {}) =>
@@ -200,6 +201,7 @@ export class ContainerManager extends EventEmitter {
   }
 
   async ensureContainer(projectRoot: string, logFile?: string): Promise<ContainerInfo> {
+    assertNotApiProcess('ContainerManager.ensureContainer');
     const info = await this._ensureRunning(projectRoot, logFile);
     if (this.options.enforceValidation) await this._requireValid(projectRoot, info);
     return info;

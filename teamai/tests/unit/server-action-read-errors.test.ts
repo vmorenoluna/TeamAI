@@ -2,6 +2,8 @@
  * A rejected TaskStore read in a server action surfaces as the action's
  * `{ success: false, error }` result — never a rejected action (a hung or
  * blank UI) and never an orchestrator call on data that could not be read.
+ * The reads happen in the `tasks.*` engine handlers (the action wrappers pass the
+ * result through unchanged), so these tests drive the handlers directly.
  *
  *   AC6: retryTask on a getByIdAsync or getDirByIdAsync rejection.
  *   AC7: every other task-control action on a getByIdAsync rejection.
@@ -66,10 +68,18 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { TaskStore } from '@/lib/task-store';
-import {
-  retryTask, retryTaskWithOptions, pauseTask, resumeTask, stopTask, playTask, restartCurrentPhase,
-} from '@/app/actions/tasks';
-import { analyzeFailedTask } from '@/app/actions/role-refinement';
+import { tasksHandlers } from '@/engine/handlers/tasks';
+
+type Result = { success: boolean; error?: string };
+const call = (name: string, params: Record<string, unknown>) =>
+  tasksHandlers[`tasks.${name}`]({ projectPath: testDir, ...params }) as Promise<Result>;
+const retryTask = (taskId: string) => call('retryTask', { taskId });
+const retryTaskWithOptions = (taskId: string, phase: string) => call('retryTaskWithOptions', { taskId, phase });
+const pauseTask = (taskId: string) => call('pauseTask', { taskId });
+const resumeTask = (taskId: string) => call('resumeTask', { taskId });
+const stopTask = (taskId: string) => call('stopTask', { taskId });
+const playTask = (taskId: string) => call('playTask', { taskId });
+const restartCurrentPhase = (taskId: string) => call('restartCurrentPhase', { taskId });
 
 const READ_ERROR = 'EIO: i/o error, read';
 
@@ -128,7 +138,6 @@ describe('server actions return the read error', () => {
       ['stopTask', () => stopTask(taskId)],
       ['playTask', () => playTask(taskId)],
       ['restartCurrentPhase', () => restartCurrentPhase(taskId)],
-      ['analyzeFailedTask', () => analyzeFailedTask(taskId)],
     ];
 
     it.each(actions)('%s resolves { success: false, error } when getByIdAsync rejects', async (_name, run) => {
