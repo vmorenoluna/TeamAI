@@ -20,6 +20,13 @@ describe('getBackgroundActionResult', () => {
     await expect(getBackgroundActionResult('op1')).resolves.toEqual({ status: 'unknown' });
   });
 
+  it('degrades to unknown on a plain Error named EngineUnavailableError', async () => {
+    const err = new Error('down');
+    err.name = 'EngineUnavailableError';
+    engineCall.mockRejectedValue(err);
+    await expect(getBackgroundActionResult('op1')).resolves.toEqual({ status: 'unknown' });
+  });
+
   it('rethrows EngineTimeoutError and other errors', async () => {
     engineCall.mockRejectedValue(new EngineTimeoutError('slow'));
     await expect(getBackgroundActionResult('op1')).rejects.toBeInstanceOf(EngineTimeoutError);
