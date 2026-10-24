@@ -30,7 +30,7 @@ serving pages, server actions and the WebSocket regardless of what the engine is
   lives in `src/engine/handlers/`, merged into one method table in `handlers/index.ts`.
 - `src/lib/process-role.ts` guards the boundary. `assertNotApiProcess(what)` throws
   `EngineBoundaryError` when engine-only work is attempted in the API process, and
-  `getProcessRole()` reports `api`, `engine` or `standalone` (tests and scripts).
+  `getProcessRole()` reports `api` or `engine`, or `undefined` (tests and scripts).
 
 ### Alternatives rejected
 

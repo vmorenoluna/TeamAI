@@ -3,13 +3,13 @@
  * TEAMAI_PROCESS_ROLE=api; the engine child process runs the orchestrator, auto
  * mode and ProcessManager. Leaf module: imports nothing from the app.
  */
-export type ProcessRole = 'api' | 'engine' | 'standalone';
+export type ProcessRole = 'api' | 'engine';
 
-/** Read on every call — never cached, so tests and the launcher can change it. */
-export function getProcessRole(): ProcessRole {
+/** Read on every call — never cached. `undefined` in tests and scripts, where no role is set. */
+export function getProcessRole(): ProcessRole | undefined {
   const role = process.env.TEAMAI_PROCESS_ROLE;
   if (role === 'api' || role === 'engine') return role;
-  return 'standalone';
+  return undefined;
 }
 
 export class EngineBoundaryError extends Error {
