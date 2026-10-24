@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fork as nodeFork, execFileSync, spawnSync } from 'child_process';
 import type { ChildProcess } from 'child_process';
 import type { EventEmitter } from 'events';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from 'fs';
 import { createRequire } from 'module';
 import { tmpdir } from 'os';
 import { delimiter, join, resolve } from 'path';
@@ -169,6 +169,9 @@ async function createRegisteredProject(configDir: string): Promise<string> {
   const root = makeTempDir('teamai-ipc-project-');
   git(root, 'init', '-b', 'main');
   writeFileSync(join(root, 'README.md'), '# test\n');
+  // Container mode auto-enables when Docker is installed; these sessions are host stubs.
+  mkdirSync(join(root, '.teamai'), { recursive: true });
+  writeFileSync(join(root, '.teamai', 'container.json'), JSON.stringify({ enabled: false }));
 
   const previous = process.env.TEAMAI_CONFIG_DIR;
   process.env.TEAMAI_CONFIG_DIR = configDir;
@@ -343,6 +346,9 @@ describe('engine IPC (real forked engine)', () => {
     expect(terminal.pid).toBeGreaterThan(0);
     expect(existsSync(registryPath(engineEnv.port))).toBe(true);
 
+    // sessions.kill ends only the direct process on Windows; the stub's `ping` child would outlive it
+    // and keep the project dir as its cwd, so end the whole tree first.
+    killPid(agent.pid);
     await engineCall('sessions.kill', [{ sessionId: agentId }]);
     await engineCall('terminals.close', [{ sessionId: terminalId }]);
 
