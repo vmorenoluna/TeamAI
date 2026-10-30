@@ -107,7 +107,8 @@ jobs:
   # E2E suite (`test:all:coverage`) runs pre-release instead — see the
   # `full-test-suite` job in release.yml, which gates the GitHub Release.
   pr-suite:
-    runs-on: ubuntu-latest
+    # Pinned: Playwright does not support chromium on the ubuntu-latest (26.04) image.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: teamai
