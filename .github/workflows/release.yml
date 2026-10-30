@@ -43,7 +43,8 @@ jobs:
 
   full-test-suite:
     needs: version-check
-    runs-on: ubuntu-latest
+    # Pinned: Playwright does not support chromium on the ubuntu-latest (26.04) image.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: teamai
