@@ -171,6 +171,13 @@ const GUARDRAILS: GuardrailCheck[] = [
     file: 'defaults/roles/analyst.md',
     signatures: ['Evidence currency', 'git log'],
   },
+  {
+    id: 21,
+    name: 'Structural Duplication Check',
+    description: 'qa-reviewer.md Standards — passing the criteria is not sufficient; duplicated types, pass-through members or copied formulas introduced by the diff are reported (spec_concerns when the spec prescribed them)',
+    file: 'defaults/roles/qa-reviewer.md',
+    signatures: ['Passing the criteria is necessary, not sufficient', 'spec_concerns'],
+  },
 ];
 
 // ---------------------------------------------------------------------------
