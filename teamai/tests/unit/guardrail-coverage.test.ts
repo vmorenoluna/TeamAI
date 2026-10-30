@@ -174,9 +174,16 @@ const GUARDRAILS: GuardrailCheck[] = [
   {
     id: 21,
     name: 'Structural Duplication Check',
-    description: 'qa-reviewer.md Standards — passing the criteria is not sufficient; duplicated types, pass-through members or copied formulas introduced by the diff are reported (spec_concerns when the spec prescribed them)',
+    description: 'qa-review.md Step 5b — duplication the diff introduces is routed to spec_concerns when the spec prescribed it, additional_issues otherwise. Routing mechanics live in the command, not the role.',
+    file: 'defaults/commands/qa-review.md',
+    signatures: ['Structural Duplication Check', 'spec_concerns'],
+  },
+  {
+    id: 22,
+    name: 'Structure Review Discipline',
+    description: 'qa-reviewer.md Standards — passing the criteria is not sufficient; review the diff for duplicated units, pass-through members and copied formulas',
     file: 'defaults/roles/qa-reviewer.md',
-    signatures: ['Passing the criteria is necessary, not sufficient', 'spec_concerns'],
+    signatures: ['Passing the criteria is necessary, not sufficient', 'smallest consolidation'],
   },
 ];
 

@@ -90,6 +90,13 @@ Apply your role's assertion-verification discipline to each candidate item, then
    correctly-asserted cases meets the requirement. The label/assertion mismatch
    is a separate issue that the coder must also fix.
 
+### Step 5b: Structural Duplication Check
+
+Apply your role's structure-review discipline to the diff. For each duplication found, cite both locations and the smallest consolidation, then route it:
+
+- **The spec or plan prescribed the structure** (e.g. it lists the duplicating unit's members): the coder cannot fix this by deviating from the spec. Add a `spec_concerns` entry, as in Step 7, whose `suggested_fix` is the consolidation. Do NOT mark it a standard FAIL.
+- **The spec did not prescribe it**: add an `additional_issues` entry with `fix_needed`, `file`, `subtask_ids` and `files_to_fix` as for any other additional issue.
+
 ## Running Verification Scripts & Servers
 
 When verification requires running a script, server, or service (including the test
