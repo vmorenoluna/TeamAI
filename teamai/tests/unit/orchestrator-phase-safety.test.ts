@@ -756,7 +756,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const logContent = readFileSync(logFile, 'utf-8');
     expect(logContent).toContain('failed for a non-conflict reason (no unmerged files found) — not spawning a merger');
     expect(logContent).toContain('cannot rebase: You have unstaged changes');
-    expect(logContent).not.toContain('spawning merger to resolve via git merge');
+    expect(logContent).not.toContain('spawning merger to resolve them in the rebase');
   });
 
   // Deterministic recovery: the most common real cause of a non-conflict

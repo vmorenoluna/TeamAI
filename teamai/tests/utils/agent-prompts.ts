@@ -27,7 +27,8 @@ export type AgentMode =
   | 'implement-fix'
   | 'qa-review'
   | 'merge'
-  | 'resolve-cherry-pick';
+  | 'resolve-cherry-pick'
+  | 'resolve-rebase';
 
 /** Command template that defines each mode's instructions, or null for modes
  *  the orchestrator describes inline instead of via a command (none today). */
@@ -42,6 +43,7 @@ const MODE_COMMAND: Record<AgentMode, string | null> = {
   'qa-review': 'qa-review',
   'merge': 'merge',
   'resolve-cherry-pick': 'resolve-cherry-pick',
+  'resolve-rebase': 'resolve-rebase',
 };
 
 const COMMAND_HEADER = /^<!-- \.claude\/commands\/([a-z-]+)\.md -->\n/;

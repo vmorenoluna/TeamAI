@@ -248,16 +248,13 @@ describe('CreatePR Conflict Resolution Integration', () => {
     await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, { timeout: 10_000 });
 
     // Verify the merger agent was spawned
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('merge', 'origin/master'));
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('resolve-rebase', 'origin/master'));
 
-    // Simulate the merger agent resolving the conflict:
-    try {
-      execFileSync('git', ['merge', 'origin/master'], { cwd: worktreePath, stdio: 'ignore' });
-    } catch {
-      writeFileSync(join(worktreePath, 'conflict.txt'), 'RESOLVED BY MERGER\n');
-      execFileSync('git', ['add', 'conflict.txt'], { cwd: worktreePath, stdio: 'ignore' });
-      execFileSync('git', ['commit', '-m', 'merge resolved by merger agent'], { cwd: worktreePath, stdio: 'ignore' });
-    }
+    // Simulate the merger agent resolving the conflict INSIDE the rebase the
+    // orchestrator left stopped (never via git merge — the history stays linear):
+    writeFileSync(join(worktreePath, 'conflict.txt'), 'RESOLVED BY MERGER\n');
+    execFileSync('git', ['add', 'conflict.txt'], { cwd: worktreePath, stdio: 'ignore' });
+    execFileSync('git', ['-c', 'core.editor=true', 'rebase', '--continue'], { cwd: worktreePath, stdio: 'ignore' });
 
     // Complete the merger session
     fireEvent('event', { sessionId: 'sess-merge', event: { type: 'result' } });
@@ -305,7 +302,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
     await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, { timeout: 10_000 });
 
     // Verify merger was spawned
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('merge', 'origin/master'));
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('resolve-rebase', 'origin/master'));
 
     // Simulate merger failure — exit with non-zero code
     fireEvent('exit', { sessionId: 'sess-merge', code: 1 });
@@ -349,7 +346,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
     // Should NOT have sent the merge command for origin/master (no rebase conflict)
     const sendCalls = mockSendMessage.mock.calls as any[][];
     const mergeCalls = sendCalls.filter(
-      (c) => c[1] && typeof c[1] === 'string' && c[1] === renderCommand('merge', 'origin/master'),
+      (c) => c[1] && typeof c[1] === 'string' && c[1] === renderCommand('resolve-rebase', 'origin/master'),
     );
     expect(mergeCalls.length).toBe(0);
 

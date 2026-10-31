@@ -11,7 +11,7 @@ import { execGitQueued } from './worktree-utils';
 import { humanDirectiveFor, consumeFeedbackIfDue } from './human-feedback';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
-import { syncPhaseBaseline } from './phase-runners';
+import { syncPhaseBaseline, finishUnfinishedMerge, abortRebase } from './phase-runners';
 import { readJsonFile } from '../json-io';
 import { RateLimitError } from './rate-limit';
 import { prepareBacklogCheck, runBacklogCheck, backlogCheckEnabled } from './backlog-check';
@@ -170,18 +170,17 @@ async function reconcileDivergedBranch(
     // Not every failed `git rebase` is a real conflict — the dirty-worktree
     // case is handled deterministically above, but a stale git lock or a
     // permission error raises the exact same way and has no mechanical fix.
-    // Check for actual unmerged paths before aborting (aborting clears that
-    // mid-rebase state). Spawning a merger for a non-conflict failure just
-    // wastes a session that finds nothing to resolve and reports "nothing
-    // to do" — see phase-runners.ts's rebaseOntoLatestDefault, which has
-    // the same check for the same reason.
+    // Check for actual unmerged paths (mid-rebase) first. Spawning a merger
+    // for a non-conflict failure just wastes a session that finds nothing to
+    // resolve and reports "nothing to do" — see phase-runners.ts's
+    // rebaseOntoLatestDefault, which has the same check for the same reason.
     let unmergedFiles = '';
     try {
       unmergedFiles = (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath)).trim();
     } catch { /* best-effort — treat as unknown, fall through to the conflict path below */ }
-    try { await deps.execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* ignore */ }
 
     if (!unmergedFiles) {
+      await abortRebase(deps, pipeline.worktreePath);
       const rebaseMsg = rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr);
       logToOutput(pipeline.specPath,
         `[QA-PRECHECK] Rebase onto ${targetRef} failed for a non-conflict reason (no unmerged files found) — ` +
@@ -189,10 +188,13 @@ async function reconcileDivergedBranch(
       return 'failed';
     }
 
-    logToOutput(pipeline.specPath, `[QA-PRECHECK] Rebase onto ${targetRef} had conflicts — spawning merger to resolve via git merge\n`);
+    logToOutput(pipeline.specPath, `[QA-PRECHECK] Rebase onto ${targetRef} had conflicts — spawning merger to resolve them in the rebase\n`);
     try {
       const mergeLogFile = path.join(pipeline.specPath, 'output-merge.log');
-      const mergeMessage = renderCommand('merge', targetRef);
+      // The merger resolves IN the stopped rebase so the branch history stays
+      // linear (a merge commit could not be cherry-picked when subtask
+      // branches are landed onto it); if it cannot finish, the rebase is aborted.
+      const mergeMessage = renderCommand('resolve-rebase', targetRef);
       const mergeSessionId = await processManager.createSession(
         deps.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, mergeLogFile),
       );
@@ -200,9 +202,15 @@ async function reconcileDivergedBranch(
       processManager.sendMessage(mergeSessionId, mergeMessage);
       await deps.waitForCompletion(mergeSessionId);
       processManager.killSession(mergeSessionId);
+      if (!await finishUnfinishedMerge(deps, pipeline.worktreePath, pipeline.specPath)) {
+        await abortRebase(deps, pipeline.worktreePath);
+        logToOutput(pipeline.specPath, `[QA-PRECHECK] Merger could not finish the rebase onto ${targetRef}\n`);
+        return 'failed';
+      }
       logToOutput(pipeline.specPath, `[QA-PRECHECK] Merger resolved divergence from ${targetRef}\n`);
       return 'merged';
     } catch (mergeErr) {
+      await abortRebase(deps, pipeline.worktreePath);
       const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
       logToOutput(pipeline.specPath, `[QA-PRECHECK] Merger could not resolve divergence: ${mergeMsg}\n`);
       return 'failed';

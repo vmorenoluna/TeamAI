@@ -588,7 +588,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
         throw new Error('CONFLICT (content): Merge conflict');
       }
       // Confirms a genuine conflict — required for the merger-spawn path.
-      if (args && args[0] === 'diff' && args.includes('--diff-filter=U')) return 'src/conflicted-file.ts\n';
+      if (args && args[0] === 'diff' && args.includes('--diff-filter=U')) return mockSendMessage.mock.calls.length > 0 ? '' : 'src/conflicted-file.ts\n';
       if (args && args[0] === 'push') {
         pushCalls++;
         // 1st push: the initial precheck, rejected (non-fast-forward) — triggers reconciliation.
@@ -611,7 +611,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(1);
     }, WAIT);
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('merge', 'origin/feat/robustness-test'));
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('resolve-rebase', 'origin/feat/robustness-test'));
     fireEvent('event', { sessionId: 'sess-merge', event: { type: 'result' } });
 
     // Then the QA session, once the orchestrator has pushed the merger's result
@@ -628,7 +628,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
 
     expect(pushCalls).toBe(2);
     const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-    expect(logContent).toContain('spawning merger to resolve via git merge');
+    expect(logContent).toContain('spawning merger to resolve them in the rebase');
     expect(logContent).toContain('Merger resolved divergence from origin/feat/robustness-test');
     expect(logContent).toContain('Pushed the reconciled branch after merger resolution — remote matches worktree');
   });
@@ -684,7 +684,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
         throw new Error('CONFLICT (content): Merge conflict');
       }
       // Confirms a genuine conflict — required for the merger-spawn path.
-      if (args && args[0] === 'diff' && args.includes('--diff-filter=U')) return 'src/conflicted-file.ts\n';
+      if (args && args[0] === 'diff' && args.includes('--diff-filter=U')) return mockSendMessage.mock.calls.length > 0 ? '' : 'src/conflicted-file.ts\n';
       // Every push attempt fails — both the initial precheck push and the
       // orchestrator's own push after the merger resolves the conflict.
       if (args && args[0] === 'push') throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');

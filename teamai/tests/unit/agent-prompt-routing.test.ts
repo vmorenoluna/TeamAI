@@ -668,7 +668,7 @@ describe('merge routing', () => {
     expect(s.request).toContain('feat/build-the-thing');
   });
 
-  it('rebase onto the base branch with conflicts → merge mode for origin/<base> in the worktree', async () => {
+  it('rebase onto the base branch with conflicts → resolve-rebase mode for origin/<base> in the worktree', async () => {
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
       if (args[0] === 'rev-list') return '3\n';
       if (args[0] === 'fetch') return '';
@@ -686,13 +686,13 @@ describe('merge routing', () => {
 
     expect(mockSendMessage).toHaveBeenCalledTimes(1);
     const s = sent();
-    expect(promptMode(s.message)).toBe('merge');
+    expect(promptMode(s.message)).toBe('resolve-rebase');
     expect(s.role).toBe('merger');
     expect(s.cwd).toBe(ctx.worktreePath);
     expect(s.request).toContain('origin/main');
   });
 
-  it('QA precheck finds the branch diverged from its own remote → merge mode for origin/<branch>', async () => {
+  it('QA precheck finds the branch diverged from its own remote → resolve-rebase mode for origin/<branch>', async () => {
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
       if (args[0] === 'fetch') return '';
       if (args[0] === 'log') return 'abc123 local commit\n';
@@ -711,7 +711,7 @@ describe('merge routing', () => {
     ));
 
     const s = sent();
-    expect(promptMode(s.message)).toBe('merge');
+    expect(promptMode(s.message)).toBe('resolve-rebase');
     expect(s.role).toBe('merger');
     expect(s.cwd).toBe(ctx.worktreePath);
     expect(s.request).toContain('origin/feat/build-the-thing');

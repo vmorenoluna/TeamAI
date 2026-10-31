@@ -181,6 +181,15 @@ const CONTRACT: Partial<Record<AgentMode, Rule[]>> = {
     r('non-interactive continue', 'GIT_EDITOR=true git -c core.hooksPath=/dev/null cherry-pick --continue'),
     r('a failing project hook never leaves the pick unfinished', 'Do NOT leave the'),
   ],
+  'resolve-rebase': [
+    r('adopt the injected role persona', 'Adopt the role persona'),
+    r('never push from the agent', 'Do NOT push'),
+    r('resolve inside the rebase, never by merging', 'run `git merge`'),
+    r('tests run before the rebase is continued', 'Do NOT run `git rebase --continue` yet'),
+    r('remaining test failures are reported, never hidden', 'state clearly in your summary which tests fail'),
+    r('non-interactive continue', 'GIT_EDITOR=true git -c core.hooksPath=/dev/null rebase --continue'),
+    r('a failing project hook never leaves the rebase unfinished', 'Do NOT leave the rebase unfinished'),
+  ],
 };
 
 describe('command contract coverage per work mode', () => {
