@@ -2956,6 +2956,41 @@ export async function runImplement(
 //  Shared st-branch recovery (Defects 4 & 8)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Build the `git cherry-pick` arguments that replay `pipelineBranch..stBranch`.
+ *
+ * A plain range cherry-pick hard-fails on a merge commit ("is a merge but no
+ * -m option was given"). Merge commits land in a subtask branch's range when an
+ * upstream sync was resolved with `git merge` while the branch was long-lived
+ * (held for scope arbitration, or sleeping on a wakeup). When the range holds
+ * any, replay the explicit list of its non-merge commits instead —
+ * `--cherry-pick --right-only` drops commits the feature branch already carries
+ * by patch (a synced upstream change), so none replays as empty. With no merge
+ * in the range the plain range is returned unchanged. Returns null when there
+ * is nothing left to replay.
+ */
+export async function buildCherryPickArgs(
+  projectRoot: string, pipelineBranch: string, stBranch: string, specPath?: string,
+): Promise<string[] | null> {
+  const range = pipelineBranch + '..' + stBranch;
+  try {
+    const merges = (await execGitQueued(['rev-list', '--merges', range], projectRoot, projectRoot)).trim();
+    if (!merges) return ['cherry-pick', range];
+    const commits = (await execGitQueued(
+      ['rev-list', '--reverse', '--no-merges', '--cherry-pick', '--right-only', pipelineBranch + '...' + stBranch],
+      projectRoot, projectRoot,
+    )).split('\n').map(c => c.trim()).filter(Boolean);
+    if (specPath) {
+      logToOutput(specPath,
+        '[WORKTREE] ' + stBranch + ' has ' + merges.split('\n').length + ' merge commit(s) in its range — ' +
+        'replaying its ' + commits.length + ' non-merge commit(s) individually\n');
+    }
+    return commits.length ? ['cherry-pick', ...commits] : null;
+  } catch {
+    return ['cherry-pick', range];
+  }
+}
+
 /** Result of recovering unintegrated commits from a per-subtask -stN branch. */
 export interface StBranchRecoveryResult {
   /** True if recovery succeeded or was not needed (safe to delete/recreate). */
@@ -3029,8 +3064,10 @@ export async function _recoverStBranchCommits(
   );
 
   // Attempt to cherry-pick the commits into the main worktree
+  const cpArgs = await buildCherryPickArgs(projectRoot, pipelineBranch, stBranch, specPath);
+  if (!cpArgs) return { recovered: true, commits };
   try {
-    await execGitFn(['cherry-pick', pipelineBranch + '..' + stBranch], worktreePath);
+    await execGitFn(cpArgs, worktreePath);
     logToOutput(specPath,
       '[WORKTREE] Auto-recovered ' + commits.length + ' commit(s) from ' + stBranch +
       ' onto ' + pipelineBranch + '\n'
@@ -3052,7 +3089,7 @@ export async function _recoverStBranchCommits(
         try {
           await containerManager.ensureContainer(projectRoot, logFile);
           await new Promise(r => setTimeout(r, 1000)); // brief backoff for container stabilisation
-          await execGitFn(['cherry-pick', pipelineBranch + '..' + stBranch], worktreePath);
+          await execGitFn(cpArgs, worktreePath);
           logToOutput(specPath,
             '[WORKTREE] Auto-recovered ' + commits.length + ' commit(s) from ' + stBranch +
             ' onto ' + pipelineBranch + ' after infra retry\n'
@@ -3261,9 +3298,14 @@ export async function tryCherryPickWithRecovery(
   } catch { /* best-effort — fall through to the real attempt */ }
 
   // Tier 1: Normal cherry-pick
+  const cpArgs = await buildCherryPickArgs(deps.projectRoot, pipeline.branch, stBranch, pipeline.specPath);
+  if (!cpArgs) {
+    logToOutput(pipeline.specPath, '\n[WORKTREE] Subtask ' + subtaskId + ' branch ' + stBranch + ' has nothing left to replay — already on ' + pipeline.branch + '\n');
+    return true;
+  }
   try {
     logToOutput(pipeline.specPath, '\n[WORKTREE] Cherry-picking commits from ' + stBranch + ' onto ' + pipeline.branch + '\n');
-    await deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
+    await deps.execGit(cpArgs, pipeline.worktreePath);
     logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick succeeded for subtask ' + subtaskId + '\n');
     return true;
   } catch (firstErr) {
@@ -3283,7 +3325,7 @@ export async function tryCherryPickWithRecovery(
           try {
             await containerManager.ensureContainer(deps.projectRoot, logFile);
             await new Promise(r => setTimeout(r, 1000)); // brief backoff for container stabilisation
-            await deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
+            await deps.execGit(cpArgs, pipeline.worktreePath);
             logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick recovered after infra retry for subtask ' + subtaskId + '\n');
             return true;
           } catch (retryErr) {

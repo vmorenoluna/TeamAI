@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Landing a subtask branch no longer fails the task when its commit range contains a merge commit (for example from an upstream sync resolved with `git merge` while the branch was held or waiting on a long job). A plain `git cherry-pick <range>` cannot replay a merge, which failed the task with `CHERRY_PICK_RECOVERY_EXHAUSTED` after every subtask had passed. The orchestrator now replays the branch's non-merge commits individually, skipping those the feature branch already carries by patch. The implement instructions tell coders to keep subtask branches linear
+
 ## [0.4.0] — 2026-10-24
 
 - **Upgrading with tickets in flight:** updating restarts the app, which stops any agent session that is running. Task state under `.teamai/` is read as-is and no migration is needed. On startup the engine scans for interrupted tasks and resumes them from their last phase, and it re-enables auto mode for every project that had it on. A task that does not resume by itself shows as `failed`; press Retry and it continues from the phase where it stopped. Agent instructions come from this version's commands, as in 0.2.0
