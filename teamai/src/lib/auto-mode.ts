@@ -552,17 +552,15 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
         try {
           const method = await _resolveMergeMethod(
             projectRoot,
-            computePipelineConfig(projectRoot).autoMergeMethod ?? 'merge',
+            computePipelineConfig(projectRoot).autoMergeMethod ?? 'squash',
           );
           // Ticket-history refactor (§3h): 'squash' is the only merge method
           // that always synthesizes a brand-new commit message, so the
           // trailer-bearing message prepared by the pre-merge squash (§3b)
           // must be passed explicitly or GitHub would replace it with a
-          // generic "Merge pull request #N" subject. 'merge' keeps the branch
-          // commit (already carrying the trailers) as an ancestor, and
-          // 'rebase' replays it verbatim — both findable via git log --grep
-          // regardless; passing --subject/--body-file there is cosmetic and
-          // 'rebase' ignores them entirely, so only squash gets the override.
+          // generic subject. 'rebase' replays the branch commit (already
+          // carrying the trailers) verbatim and ignores --subject/--body-file,
+          // so only squash gets the override.
           const mergeArgs = ['pr', 'merge', prNumber, `--${method}`];
           if (method === 'squash') {
             const ticketMsg = buildTicketMessageForTask(projectRoot, taskId);
@@ -627,30 +625,29 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
   state.ciPollTimers.set(taskId, timer);
 }
 
-type MergeMethod = 'merge' | 'squash' | 'rebase';
+type MergeMethod = 'squash' | 'rebase';
 
 /**
  * Pick the merge method `gh pr merge` should use. The configured method is
  * honoured when the repository allows it; otherwise fall back to an allowed
- * one (squash, then rebase, then merge). Without this, a repo that disables
- * merge commits — while `autoMergeMethod` is unset and defaults to 'merge' —
- * fails every attempt, exhausts MAX_MERGE_FAILURES, and strands a green PR in
- * pr-open. Best-effort: if the repo settings can't be read, use the configured
- * method unchanged.
+ * one (squash, then rebase). Merge commits are never used, so the history of
+ * the base branch stays linear. Without the fallback, a repo that disables the
+ * configured method fails every attempt, exhausts MAX_MERGE_FAILURES, and
+ * strands a green PR in pr-open. Best-effort: if the repo settings can't be
+ * read, use the configured method unchanged.
  */
 async function _resolveMergeMethod(projectRoot: string, configured: MergeMethod): Promise<MergeMethod> {
   try {
     const { stdout } = await execFileAsync(getToolPath('gh'), [
-      'repo', 'view', '--json', 'mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed',
+      'repo', 'view', '--json', 'squashMergeAllowed,rebaseMergeAllowed',
     ], { cwd: projectRoot, encoding: 'utf-8', timeout: 10_000 });
     const repo = JSON.parse(stdout) as Record<string, unknown>;
     const allowed: Record<MergeMethod, boolean> = {
-      merge: repo.mergeCommitAllowed !== false,
       squash: repo.squashMergeAllowed !== false,
       rebase: repo.rebaseMergeAllowed !== false,
     };
     if (allowed[configured]) return configured;
-    const fallback = (['squash', 'rebase', 'merge'] as const).find(m => allowed[m]);
+    const fallback = (['squash', 'rebase'] as const).find(m => allowed[m]);
     if (fallback) {
       log('auto-mode', `Merge method '${configured}' is not allowed by the repository — using '${fallback}'`);
       return fallback;

@@ -77,7 +77,7 @@ describe('command-templates (fixture directory)', () => {
 /** Commands the orchestrator renders for pipeline sessions. */
 const PIPELINE_COMMANDS = [
   'spec', 'spec-revise', 'spec-summary', 'plan', 'plan-revise', 'implement', 'implement-fix', 'qa-review',
-  'merge', 'resolve-cherry-pick',
+  'resolve-cherry-pick', 'resolve-rebase',
 ];
 
 describe('shipped command templates', () => {

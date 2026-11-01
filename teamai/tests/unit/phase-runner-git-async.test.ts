@@ -249,7 +249,7 @@ describe('runQaReview git calls', () => {
     expect(report.overall).toBe('PASS');
   }, TEST_TIMEOUT);
 
-  it('AC8: a rejected rebase in reconcileDivergedBranch (no unmerged files) bounces without a merger or a rejection', async () => {
+  it('AC8: a rejected rebase in reconcileDivergedBranch (no unmerged files) fails the phase without a merger or a QA verdict', async () => {
     let pushes = 0;
     h.handler = (file, args) => {
       calls.push(args);
@@ -262,14 +262,13 @@ describe('runQaReview git calls', () => {
       return ''; // `diff --name-only --diff-filter=U` → no unmerged paths
     };
 
-    await expect(orch.runQaReview(pipeline)).resolves.not.toThrow();
+    // QA checks the final shape of the branch: a reconcile that cannot complete is an error, not a QA verdict
+    await expect(orch.runQaReview(pipeline)).rejects.toMatchObject({ code: 'QA_RECONCILE_FAILED' });
 
     expect(called(calls, 'rebase', 'origin/feat/x')).toBe(true);
     expect(pm.state.createSession).toBe(0); // no merger and no QA session
     expect(pushes).toBeGreaterThan(0);
-    const report = JSON.parse(readFileSync(join(testData.taskDir, 'qa_report.json'), 'utf-8'));
-    expect(report.overall).toBe('FAIL');
-    expect(report.criteria[0].name).toBe('Unpushed commits');
+    expect(existsSync(join(testData.taskDir, 'qa_report.json'))).toBe(false);
     const log = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
     expect(log).toContain('failed for a non-conflict reason');
   }, TEST_TIMEOUT);
@@ -303,7 +302,8 @@ describe('AC4: rebaseOntoLatestDefault', () => {
     const p = rebaseOntoLatestDefault(dir, 't', 'feat/x', logFile, makeDeps()).then(r => { done = true; return r; });
     expect(await eventLoopTurn()).toBe(true);
     expect(done).toBe(false);
-    expect(execGitCapture).not.toHaveBeenCalled();
+    // Only the "is a rebase left in progress?" probe runs before the fetch; the rev-list count waits for it.
+    expect(execGitCapture.mock.calls.every(([a]) => a[0] === 'rev-parse')).toBe(true);
 
     fetchGate.resolve('');
     expect(await p).toBe(true);

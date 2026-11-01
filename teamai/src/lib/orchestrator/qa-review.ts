@@ -11,9 +11,11 @@ import { execGitQueued } from './worktree-utils';
 import { humanDirectiveFor, consumeFeedbackIfDue } from './human-feedback';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
-import { syncPhaseBaseline } from './phase-runners';
+import { syncPhaseBaseline, rebaseResolvingConflicts } from './phase-runners';
+import { replayInProgress } from './replay-driver';
 import { readJsonFile } from '../json-io';
 import { RateLimitError } from './rate-limit';
+import { WorktreeError, SessionKilledError } from './errors';
 import { prepareBacklogCheck, runBacklogCheck, backlogCheckEnabled } from './backlog-check';
 import { TaskStore } from '../task-store';
 import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } from './wakeup';
@@ -120,18 +122,15 @@ type ReconcileOutcome = 'rebased' | 'merged' | 'failed';
  * Reconcile a feature branch that has diverged from its own remote
  * counterpart — origin/<branch> holds commits (or different commit hashes
  * for the same logical changes) that this worktree's local branch doesn't
- * have — as opposed to a rebase onto the upstream base branch. Attempts a
- * rebase onto origin/<branch> first; on conflict, aborts the rebase and
- * spawns a merger agent to resolve via `git merge` instead. Same recovery
- * pattern already proven for base-branch rebases (phase-runners.ts,
- * rebaseOntoLatestDefault), just targeting the branch's own origin ref.
+ * have — as opposed to a rebase onto the upstream base branch. Rebases onto
+ * origin/<branch> via rebaseResolvingConflicts (phase-runners.ts): the
+ * orchestrator drives the rebase and only spawns the merger for a stop with
+ * conflicts. Never creates a merge commit.
  *
- * Returns which path succeeded. Neither path pushes on its own — a plain
- * rebase never does, and the merger agent only resolves the conflict and
- * commits locally (see defaults/commands/merge.md step 6: agent sessions run
- * their own git inside the container and have no GitHub credentials to push
- * with). The caller must push the result itself for BOTH 'rebased' and
- * 'merged'.
+ * Returns which path succeeded. Neither path pushes on its own (agent
+ * sessions run their own git inside the container and have no GitHub
+ * credentials to push with), so the caller must push the result itself for
+ * BOTH 'rebased' (no conflicts) and 'merged' (the merger resolved conflicts).
  */
 async function reconcileDivergedBranch(
   pipeline: TaskPipeline,
@@ -143,7 +142,11 @@ async function reconcileDivergedBranch(
   // killed mid-`git merge` by recovery.ts's stall sweep, most concretely) —
   // see rebaseOntoLatestDefault's matching guard (phase-runners.ts) for the
   // full rationale. Safe unconditional no-ops when nothing is in progress.
-  try { await deps.execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
+  // A rebase in progress is the pause point of a rate limit mid-resolution: it is resumed, not reset.
+  const resuming = await replayInProgress(deps, 'rebase', pipeline.worktreePath);
+  if (!resuming) {
+    try { await deps.execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
+  }
   try { await deps.execGit(['merge', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
 
   // `git rebase` refuses to start against a dirty worktree — not a content
@@ -152,7 +155,7 @@ async function reconcileDivergedBranch(
   // matching guard (phase-runners.ts) for the full rationale.
   try {
     const status = (await deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath)).trim();
-    if (status) {
+    if (status && !resuming) {
       await deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
       await deps.execGit(['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before rebase'], pipeline.worktreePath);
       logToOutput(pipeline.specPath, `[QA-PRECHECK] Worktree had uncommitted changes — auto-committed before rebasing onto ${targetRef}\n`);
@@ -162,52 +165,25 @@ async function reconcileDivergedBranch(
     logToOutput(pipeline.specPath, `[QA-PRECHECK] Could not auto-commit dirty worktree before rebase: ${guardMsg}\n`);
   }
 
-  try {
-    await deps.execGit(['rebase', targetRef], pipeline.worktreePath);
+  // QA must verify the FINAL shape of the branch, so a reconcile that cannot complete is never turned into a
+  // QA verdict: a merger that cannot run (MERGER_SESSION_FAILED), a rate limit or a stop propagates, and a
+  // rebase that fails for a non-conflict reason fails the phase (Retry resumes it).
+  const outcome = await rebaseResolvingConflicts(deps, {
+    worktreePath: pipeline.worktreePath, taskId: pipeline.taskId, projectRoot: deps.projectRoot, targetRef, targetLabel: targetRef,
+    logDir: pipeline.specPath, logPrefix: '[QA-PRECHECK] ',
+  });
+  if (outcome === 'failed') {
+    throw new WorktreeError(
+      `Could not rebase onto ${targetRef} (the failure is not a conflict — see output.log); QA needs the reconciled branch.`,
+      'QA_RECONCILE_FAILED',
+    );
+  }
+  if (outcome === 'clean') {
     logToOutput(pipeline.specPath, `[QA-PRECHECK] Rebased onto ${targetRef}\n`);
     return 'rebased';
-  } catch (rebaseErr) {
-    // Not every failed `git rebase` is a real conflict — the dirty-worktree
-    // case is handled deterministically above, but a stale git lock or a
-    // permission error raises the exact same way and has no mechanical fix.
-    // Check for actual unmerged paths before aborting (aborting clears that
-    // mid-rebase state). Spawning a merger for a non-conflict failure just
-    // wastes a session that finds nothing to resolve and reports "nothing
-    // to do" — see phase-runners.ts's rebaseOntoLatestDefault, which has
-    // the same check for the same reason.
-    let unmergedFiles = '';
-    try {
-      unmergedFiles = (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath)).trim();
-    } catch { /* best-effort — treat as unknown, fall through to the conflict path below */ }
-    try { await deps.execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* ignore */ }
-
-    if (!unmergedFiles) {
-      const rebaseMsg = rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr);
-      logToOutput(pipeline.specPath,
-        `[QA-PRECHECK] Rebase onto ${targetRef} failed for a non-conflict reason (no unmerged files found) — ` +
-        `not spawning a merger: ${rebaseMsg}\n`);
-      return 'failed';
-    }
-
-    logToOutput(pipeline.specPath, `[QA-PRECHECK] Rebase onto ${targetRef} had conflicts — spawning merger to resolve via git merge\n`);
-    try {
-      const mergeLogFile = path.join(pipeline.specPath, 'output-merge.log');
-      const mergeMessage = renderCommand('merge', targetRef);
-      const mergeSessionId = await processManager.createSession(
-        deps.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, mergeLogFile),
-      );
-      updateSessionMap(pipeline.specPath, 'merge', mergeSessionId);
-      processManager.sendMessage(mergeSessionId, mergeMessage);
-      await deps.waitForCompletion(mergeSessionId);
-      processManager.killSession(mergeSessionId);
-      logToOutput(pipeline.specPath, `[QA-PRECHECK] Merger resolved divergence from ${targetRef}\n`);
-      return 'merged';
-    } catch (mergeErr) {
-      const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
-      logToOutput(pipeline.specPath, `[QA-PRECHECK] Merger could not resolve divergence: ${mergeMsg}\n`);
-      return 'failed';
-    }
   }
+  logToOutput(pipeline.specPath, `[QA-PRECHECK] Merger resolved divergence from ${targetRef}\n`);
+  return 'merged';
 }
 
 function maxQaRoundsOf(pipeline: TaskPipeline): number {
@@ -487,7 +463,11 @@ async function runQaReviewRound(
         }
       }
     }
-  } catch { /* branch doesn't exist on remote */ }
+  } catch (err) {
+    // Only "the branch doesn't exist on the remote" is benign here. A rate limit, a stop or a failed
+    // reconcile means the branch is not in its final shape and must not be swallowed into a QA verdict.
+    if (err instanceof RateLimitError || err instanceof WorktreeError || err instanceof SessionKilledError) throw err;
+  }
 
   if (hasUnpushed) {
     const failReport: QaReport = {

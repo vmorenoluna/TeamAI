@@ -87,7 +87,6 @@ import { getToolPath } from '../../src/lib/tool-checker';
 import { processManager } from '../../src/lib/process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath, checkDockerAvailable, readContainerRemoteUser } from '../../src/lib/container-manager';
 import { ContainerDockerMissingError, OrchestratorError } from '../../src/lib/orchestrator/errors';
-import { renderCommand } from '../../src/lib/command-templates';
 
 const fireEvent = createFireEvent(onHandlers);
 
@@ -2878,7 +2877,7 @@ describe('Orchestrator', () => {
       // execGit was called for merge
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['merge', `feat/${slug}`]),
+        expect.arrayContaining(['merge', '--ff-only', `feat/${slug}`]),
         expect.any(Object),
       );
       // Worktree removed
@@ -2917,7 +2916,7 @@ describe('Orchestrator', () => {
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git' && Array.isArray(args)) {
           const argStr = args.join(' ');
-          if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+          if (argStr.includes('rebase') && !argStr.includes('--abort') && !argStr.includes('--continue')) {
             throw new Error('Rebase conflict');
           }
           // Confirms a genuine conflict — required for the merger-spawn path.
@@ -2931,7 +2930,7 @@ describe('Orchestrator', () => {
       await waitForSent('sess-merge-rebase');
 
       // Merger session should have been created for rebase conflict
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', renderCommand('merge', 'origin/main'));
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', expect.stringContaining('Rebasing onto: origin/main'));
 
       // Complete the merger session
       mergerDone = true;
@@ -2944,7 +2943,7 @@ describe('Orchestrator', () => {
       // Direct merge was attempted
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['merge', `feat/${slug}`]),
+        expect.arrayContaining(['merge', '--ff-only', `feat/${slug}`]),
         expect.any(Object),
       );
       expect(pipeline.phase).toBe('done');
@@ -2954,7 +2953,7 @@ describe('Orchestrator', () => {
       }
     });
 
-    it('throws when rebase has conflicts and merger agent also fails', async () => {
+    it('throws a clear error when the merger session cannot be started, instead of merging without the rebase', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       const slug = testData.slug;
@@ -2969,14 +2968,14 @@ describe('Orchestrator', () => {
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
 
-      // Only the merger session (rebase conflict path) — merge never created
-      mockCreateSession.mockResolvedValue('sess-merge-rebase');
+      // The merger session can never start: after repeated failures the merge phase fails loudly
+      mockCreateSession.mockRejectedValue(new Error('cannot start session'));
 
       // Simulate rebase conflict
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git' && Array.isArray(args)) {
           const argStr = args.join(' ');
-          if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+          if (argStr.includes('rebase') && !argStr.includes('--abort') && !argStr.includes('--continue')) {
             throw new Error('Rebase conflict');
           }
           // Confirms a genuine conflict — required for the merger-spawn path.
@@ -2985,17 +2984,7 @@ describe('Orchestrator', () => {
         return '';
       });
 
-      const promise = (orch as AnyOrch).runMerge(pipeline);
-      await waitForSent('sess-merge-rebase');
-
-      // Merger session was created
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', renderCommand('merge', 'origin/main'));
-
-      // Simulate merger failure — exit with non-zero code
-      fireEvent('exit', { sessionId: 'sess-merge-rebase', code: 1 });
-
-      // Merge should throw (unlike create-pr which proceeds)
-      await expect(promise).rejects.toThrow(/Rebase onto latest main failed/);
+      await expect((orch as AnyOrch).runMerge(pipeline)).rejects.toThrow(/merger session failed/);
 
       // Phase should NOT have advanced to done
       expect(pipeline.phase).not.toBe('done');
@@ -3005,7 +2994,7 @@ describe('Orchestrator', () => {
       }
     });
 
-    it('spawns merger agent when direct merge has conflicts', async () => {
+    it('never creates a merge commit or spawns a merger when the base cannot be fast-forwarded', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       const slug = testData.slug;
@@ -3020,33 +3009,25 @@ describe('Orchestrator', () => {
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
 
-      // One session: merger for the merge conflict (rebase succeeds cleanly)
-      mockCreateSession.mockResolvedValue('sess-merge-conflict');
-
-      // Rebase succeeds, but merge fails with conflict
+      // Rebase succeeds, but the base is never a fast-forward of the branch
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && Array.isArray(args)) {
-          const argStr = args.join(' ');
-          if (argStr.includes('merge') && !argStr.includes('--abort') && argStr.includes(`feat/${slug}`)) {
-            throw new Error('Merge conflict');
-          }
+        if (cmd === 'git' && Array.isArray(args) && args[0] === 'merge' && args.includes(`feat/${slug}`)) {
+          throw new Error('fatal: Not possible to fast-forward, aborting.');
         }
         return '';
       });
 
-      const promise = (orch as AnyOrch).runMerge(pipeline);
-      await waitForSent('sess-merge-conflict');
+      await expect((orch as AnyOrch).runMerge(pipeline)).rejects.toThrow();
 
-      // Merger session created for merge conflict
-      expect(mockCreateSession).toHaveBeenCalledTimes(1);
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-conflict', expect.stringContaining('/merge'));
-
-      // Complete the merger session
-      fireEvent('event', { sessionId: 'sess-merge-conflict', event: { type: 'result' } });
-      await promise;
-
-      expect(mockKillSession).toHaveBeenCalledWith('sess-merge-conflict');
-      expect(pipeline.phase).toBe('done');
+      // No merger session: the merge phase has nothing for an agent to do
+      expect(mockCreateSession).not.toHaveBeenCalled();
+      // Only fast-forward merges were ever attempted
+      const mergeCalls = (mockExecFileSync.mock.calls as unknown[][])
+        .map(c => c[1] as string[])
+        .filter(a => Array.isArray(a) && a[0] === 'merge' && a[1] !== '--abort');
+      expect(mergeCalls.length).toBeGreaterThan(0);
+      for (const a of mergeCalls) expect(a).toContain('--ff-only');
+      expect(pipeline.phase).not.toBe('done');
 
       if (existsSync(pipeline.worktreePath)) {
         rmSync(pipeline.worktreePath, { recursive: true, force: true });
@@ -3078,7 +3059,7 @@ describe('Orchestrator', () => {
       // Direct merge was attempted
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['merge', `feat/${slug}`]),
+        expect.arrayContaining(['merge', '--ff-only', `feat/${slug}`]),
         expect.any(Object),
       );
       expect(pipeline.phase).toBe('done');
@@ -3348,7 +3329,7 @@ describe('Orchestrator', () => {
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git') {
           const argStr = Array.isArray(args) ? args.join(' ') : '';
-          if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+          if (argStr.includes('rebase') && !argStr.includes('--abort') && !argStr.includes('--continue')) {
             rebaseCalled = true;
             throw new Error('Rebase conflict');
           }
@@ -3359,7 +3340,7 @@ describe('Orchestrator', () => {
             return 'refs/remotes/origin/main';
           }
           // Confirms a genuine conflict — required for the merger-spawn path.
-          if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return 'src/conflicted-file.ts\n';
+          if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return mockSendMessage.mock.calls.length > 0 ? '' : 'src/conflicted-file.ts\n';
         }
         // After rebase resolved, gh creates PR directly
         if (cmd === 'gh') {
@@ -3376,7 +3357,7 @@ describe('Orchestrator', () => {
       expect(rebaseCalled).toBe(true);
 
       // Merger session should have been created and sent /merge origin/main
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', renderCommand('merge', 'origin/main'));
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', expect.stringContaining('Rebasing onto: origin/main'));
 
       // Complete the merger session
       fireEvent('event', { sessionId: 'sess-merger', event: { type: 'result' } });
@@ -3394,7 +3375,7 @@ describe('Orchestrator', () => {
       expect(pipeline.phase).toBe('pr-open');
     });
 
-    it('falls back gracefully when merger agent cannot resolve conflicts', async () => {
+    it('respawns the merger when its session fails, until the rebase conflict is resolved', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
@@ -3408,13 +3389,13 @@ describe('Orchestrator', () => {
         worktreePath: join(testData.root, '..', 'worktrees', slug),
       });
 
-      // Only one session: merger (no PR session)
-      mockCreateSession.mockResolvedValue('sess-merger');
+      // Two merger sessions: the first one dies, the second resolves the conflict
+      mockCreateSession.mockResolvedValueOnce('sess-merger-1').mockResolvedValueOnce('sess-merger-2');
 
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git') {
           const argStr = Array.isArray(args) ? args.join(' ') : '';
-          if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+          if (argStr.includes('rebase') && !argStr.includes('--abort') && !argStr.includes('--continue')) {
             throw new Error('Rebase conflict');
           }
           if (argStr.includes('remote') && argStr.includes('get-url')) {
@@ -3423,8 +3404,10 @@ describe('Orchestrator', () => {
           if (argStr.includes('symbolic-ref')) {
             return 'refs/remotes/origin/main';
           }
-          // Confirms a genuine conflict — required for the merger-spawn path.
-          if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return 'src/conflicted-file.ts\n';
+          // The conflict stays until the second merger has been sent its request.
+          if (argStr.includes('diff') && argStr.includes('diff-filter=U')) {
+            return mockSendMessage.mock.calls.length < 2 ? 'src/conflicted-file.ts\n' : '';
+          }
         }
         // After rebase resolved, gh creates PR
         if (cmd === 'gh') {
@@ -3437,16 +3420,18 @@ describe('Orchestrator', () => {
 
       const promise = (orch as AnyOrch).runCreatePR(pipeline);
 
-      // Merger session was created      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', renderCommand('merge', 'origin/main'));
-      // Simulate merger failure — exit with non-zero code
-      await waitForSent('sess-merger');
-      fireEvent('exit', { sessionId: 'sess-merger', code: 1 });
+      await waitForSent('sess-merger-1');
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger-1', expect.stringContaining('Rebasing onto: origin/main'));
+      // The first merger session fails
+      fireEvent('exit', { sessionId: 'sess-merger-1', code: 1 });
+
+      // ...so the orchestrator spawns another one for the same conflict
+      await waitForSent('sess-merger-2');
+      fireEvent('event', { sessionId: 'sess-merger-2', event: { type: 'result' } });
       await promise;
 
-      // Pipeline still advances to pr-open even though merger failed
       expect(pipeline.phase).toBe('pr-open');
-      // Only one session created (just the merger, no PR session)
-      expect(mockCreateSession).toHaveBeenCalledTimes(1);
+      expect(mockCreateSession).toHaveBeenCalledTimes(2);
     });
 
     it('does not spawn any sessions when rebase succeeds (fast path)', async () => {
@@ -4783,7 +4768,7 @@ describe('Orchestrator', () => {
     // No merger spawned on fast path
       const sendCalls = mockSendMessage.mock.calls;
       const mergeCalls = sendCalls.filter(
-      (call: any[]) => typeof call[1] === 'string' && call[1] === renderCommand('merge', 'origin/main'),
+      (call: any[]) => typeof call[1] === 'string' && call[1].includes('Rebasing onto: origin/main'),
       );
       expect(mergeCalls.length).toBe(0);
 
@@ -4834,11 +4819,11 @@ describe('Orchestrator', () => {
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'git' && Array.isArray(args)) {
       const argStr = args.join(' ');
-      if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+      if (argStr.includes('rebase') && !argStr.includes('--abort') && !argStr.includes('--continue')) {
       throw new Error('Rebase conflict');
       }
       // Confirms a genuine conflict — required for the merger-spawn path.
-      if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return 'src/conflicted-file.ts\n';
+      if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return mockSendMessage.mock.calls.length > 0 ? '' : 'src/conflicted-file.ts\n';
       }
       return '';
     });
@@ -4847,7 +4832,7 @@ describe('Orchestrator', () => {
       await waitForSent('sess-impl-rebase');
 
     // Merger session spawns first
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', renderCommand('merge', 'origin/main'));
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', expect.stringContaining('Rebasing onto: origin/main'));
 
     // Complete merger
       fireEvent('event', { sessionId: 'sess-impl-rebase', event: { type: 'result' } });
@@ -4869,7 +4854,7 @@ describe('Orchestrator', () => {
       if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
     });
 
-    it('continues to subtasks even when rebase and merger both fail (silent failure)', async () => {
+    it('respawns the merger when its session fails, then proceeds to subtasks', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -4886,23 +4871,22 @@ describe('Orchestrator', () => {
     });
       mkdirSync(pipeline.worktreePath, { recursive: true });
 
-      let mergerCreated = false;
+      let created = 0;
       mockCreateSession.mockImplementation(() => {
-      if (!mergerCreated) {
-      mergerCreated = true;
-      return Promise.resolve('sess-impl-rebase');
-      }
+      created++;
+      if (created === 1) return Promise.resolve('sess-impl-rebase');
+      if (created === 2) return Promise.resolve('sess-impl-rebase-2');
       return Promise.resolve('sess-subtask-after');
     });
 
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'git' && Array.isArray(args)) {
       const argStr = args.join(' ');
-      if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+      if (argStr.includes('rebase') && !argStr.includes('--abort') && !argStr.includes('--continue')) {
       throw new Error('Rebase conflict');
       }
       // Confirms a genuine conflict — required for the merger-spawn path.
-      if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return 'src/conflicted-file.ts\n';
+      if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return mockSendMessage.mock.calls.length < 2 ? 'src/conflicted-file.ts\n' : '';
       }
       return '';
     });
@@ -4911,13 +4895,15 @@ describe('Orchestrator', () => {
       await waitForSent('sess-impl-rebase');
 
     // Merger was spawned
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', renderCommand('merge', 'origin/main'));
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', expect.stringContaining('Rebasing onto: origin/main'));
 
-    // Simulate merger failure
+    // The first merger session fails; the orchestrator spawns another one for the same conflict
       fireEvent('exit', { sessionId: 'sess-impl-rebase', code: 1 });
+      await waitForSent('sess-impl-rebase-2');
+      fireEvent('event', { sessionId: 'sess-impl-rebase-2', event: { type: 'result' } });
       await waitForSent('sess-subtask-after');
 
-    // Even though merger failed, implement continues (unlike merge which throws)
+    // Once the conflict is resolved, implement proceeds to the subtask
       expect(mockSendMessage).toHaveBeenCalledWith('sess-subtask-after', expect.stringContaining('Subtask 1: '));
 
     // Complete subtask -> push -> QA -> done

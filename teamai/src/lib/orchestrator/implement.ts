@@ -15,6 +15,7 @@ import { processManager, type AgentSession } from '../process-manager';
 import { readContainerConfig, containerManager, checkDockerAvailable } from '../container-manager';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { rebaseOntoLatestDefault } from './phase-runners';
+import { driveReplay } from './replay-driver';
 import { updateSessionMap, logToOutput } from './helpers';
 import { prepareBacklogCheck, runBacklogCheck, backlogCheckEnabled, evidenceProduced, evidenceWindowStart } from './backlog-check';
 import { humanDirectiveFor, readHumanFeedback } from './human-feedback';
@@ -3309,45 +3310,30 @@ export async function tryCherryPickWithRecovery(
     return false;
   }
 
-  // Tier 2: Spawn merger agent to resolve conflicts semantically
+  // Tier 2: the cherry-pick stopped on conflicts. The orchestrator drives it
+  // from here (replay-driver.ts): the merger is spawned only to edit the
+  // conflicted files, the project's verification is run by the orchestrator,
+  // and the merger is respawned until the stop is clean and verified. There is
+  // no attempt cap — the pick is expected to land; only an infrastructure
+  // failure of the merger session itself (or a rate limit / stop) ends it, as a
+  // thrown error after the pick has been aborted.
   try {
     const conflictedFiles = (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath)).trim();
     logToOutput(pipeline.specPath, '[WORKTREE] Conflicted files: ' + (conflictedFiles || '(none listed)') + '\n');
   } catch { /* best-effort — proceed with merger */ }
-  logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick has conflicts — spawning merger agent for subtask ' + subtaskId + '\n');
-  try {
-    const mergeLogFile = path.join(pipeline.specPath, 'output-merge.log');
-    // The command has the merger run the tests BEFORE `--continue`, so it
-    // fixes its resolution while it still has the conflict context, and
-    // report (never hide) failures it couldn't fix — QA stays the backstop
-    // for those. Only an unresolvable conflict is left in progress, which the
-    // check below turns into an abort + preserved branches, as before.
-    const mergeMessage = renderCommand('resolve-cherry-pick',
-      'Subtask ' + subtaskId + ': a `git cherry-pick` of branch `' + stBranch + '` onto `' + pipeline.branch + '`\n' +
-      'stopped on merge conflicts. Resolve them, run the tests, and complete the ' +
-      'cherry-pick (`git cherry-pick --continue`) as the instructions below describe.');
-    const mergeSessionId = await processManager.createSession(
-      deps.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, mergeLogFile),
-    );
-    updateSessionMap(pipeline.specPath, 'merge', mergeSessionId);
-    processManager.sendMessage(mergeSessionId, mergeMessage);
-    await deps.waitForCompletion(mergeSessionId);
-    processManager.killSession(mergeSessionId);
-
-    if (await checkCherryPickInProgress(pipeline.worktreePath, deps.execGitCapture)) {
-      logToOutput(pipeline.specPath, '[WORKTREE] Merger finished but cherry-pick still in progress for subtask ' + subtaskId + ' — aborting\n');
-      try { await deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
-      return false;
-    }
-
-    logToOutput(pipeline.specPath, '[WORKTREE] Merger agent resolved cherry-pick conflicts for subtask ' + subtaskId + '\n');
-    return true;
-  } catch (mergeErr) {
-    const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
-    logToOutput(pipeline.specPath, '[WORKTREE] Merger agent failed for subtask ' + subtaskId + ': ' + mergeMsg + '\n');
-    try { await deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
-    return false;
-  }
+  await driveReplay(deps, {
+    kind: 'cherry-pick',
+    worktreePath: pipeline.worktreePath,
+    taskId: pipeline.taskId,
+    projectRoot: deps.projectRoot,
+    logDir: pipeline.specPath,
+    logPrefix: '[WORKTREE] ',
+    request:
+      'Subtask ' + subtaskId + ': a `git cherry-pick` of branch `' + stBranch + '` onto `' + pipeline.branch + '` ' +
+      'stopped on merge conflicts.',
+  });
+  logToOutput(pipeline.specPath, '[WORKTREE] Merger agent resolved cherry-pick conflicts for subtask ' + subtaskId + '\n');
+  return true;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

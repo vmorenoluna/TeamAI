@@ -97,7 +97,6 @@ import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrato
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
 import { warn as mockWarn } from '../../src/lib/logger';
-import { renderCommand } from '../../src/lib/command-templates';
 
 const fireEvent = createFireEvent(onHandlers);
 
@@ -588,7 +587,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
         throw new Error('CONFLICT (content): Merge conflict');
       }
       // Confirms a genuine conflict — required for the merger-spawn path.
-      if (args && args[0] === 'diff' && args.includes('--diff-filter=U')) return 'src/conflicted-file.ts\n';
+      if (args && args[0] === 'diff' && args.includes('--diff-filter=U')) return mockSendMessage.mock.calls.length > 0 ? '' : 'src/conflicted-file.ts\n';
       if (args && args[0] === 'push') {
         pushCalls++;
         // 1st push: the initial precheck, rejected (non-fast-forward) — triggers reconciliation.
@@ -611,7 +610,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(1);
     }, WAIT);
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('merge', 'origin/feat/robustness-test'));
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', expect.stringContaining('Rebasing onto: origin/feat/robustness-test'));
     fireEvent('event', { sessionId: 'sess-merge', event: { type: 'result' } });
 
     // Then the QA session, once the orchestrator has pushed the merger's result
@@ -628,12 +627,12 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
 
     expect(pushCalls).toBe(2);
     const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-    expect(logContent).toContain('spawning merger to resolve via git merge');
+    expect(logContent).toContain('spawning merger to resolve it in the rebase');
     expect(logContent).toContain('Merger resolved divergence from origin/feat/robustness-test');
     expect(logContent).toContain('Pushed the reconciled branch after merger resolution — remote matches worktree');
   });
 
-  it('falls through to the FAIL report when reconciliation cannot resolve the divergence', async () => {
+  it('errors out instead of writing a QA verdict when the merger cannot run during reconciliation', async () => {
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (args && args[0] === 'fetch') return '';
       if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
@@ -650,22 +649,14 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     // Merger session itself fails to even start
     mockCreateSession.mockRejectedValue(new Error('session creation failed'));
 
-    // qaStallCount starts at 2, the pipeline-written round makes it 3 which equals maxQaAttempts (3),
-    // so it goes directly to 'failed' without bouncing back to implement — same pattern
-    // as the pre-existing "writes FAIL report..." test above.
-    const pipeline = makePipeline(project.taskId, project.taskDir, { qaStallCount: 2 });
+    const pipeline = makePipeline(project.taskId, project.taskDir, { qaStallCount: 0 });
 
-    await (orch as AnyOrch).runQaReview(pipeline);
+    // QA verifies the final shape of the branch: when the merger cannot even run, the phase errors out
+    // (Retry resumes it) instead of recording a QA verdict about a branch that is not reconciled.
+    await expect((orch as AnyOrch).runQaReview(pipeline)).rejects.toMatchObject({ code: 'MERGER_SESSION_FAILED' });
 
-    const reportPath = join(project.taskDir, 'qa_report.json');
-    const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
-    expect(report.overall).toBe('FAIL');
-    expect(report.criteria[0].name).toBe('Unpushed commits');
-
-    expect(pipeline.phase).toBe('failed');
-
-    const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-    expect(logContent).toContain('Merger could not resolve divergence');
+    expect(existsSync(join(project.taskDir, 'qa_report.json'))).toBe(false);
+    expect(pipeline.qaStallCount).toBe(0);
   });
 
   // ── Post-merger push failure ──
@@ -684,7 +675,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
         throw new Error('CONFLICT (content): Merge conflict');
       }
       // Confirms a genuine conflict — required for the merger-spawn path.
-      if (args && args[0] === 'diff' && args.includes('--diff-filter=U')) return 'src/conflicted-file.ts\n';
+      if (args && args[0] === 'diff' && args.includes('--diff-filter=U')) return mockSendMessage.mock.calls.length > 0 ? '' : 'src/conflicted-file.ts\n';
       // Every push attempt fails — both the initial precheck push and the
       // orchestrator's own push after the merger resolves the conflict.
       if (args && args[0] === 'push') throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
@@ -6983,7 +6974,7 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
     expect(containerManager.ensureContainer).not.toHaveBeenCalled();
 
     // Now simulate merger resolving the conflict
-    deps.execGitCapture = vi.fn(async () => { throw new Error('not found'); });
+    deps.execGitCapture = vi.fn(async () => '');
     mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
     resolveCompletion!();
     const result = await resultPromise;

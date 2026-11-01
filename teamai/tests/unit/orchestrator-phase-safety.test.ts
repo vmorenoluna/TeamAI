@@ -756,7 +756,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const logContent = readFileSync(logFile, 'utf-8');
     expect(logContent).toContain('failed for a non-conflict reason (no unmerged files found) — not spawning a merger');
     expect(logContent).toContain('cannot rebase: You have unstaged changes');
-    expect(logContent).not.toContain('spawning merger to resolve via git merge');
+    expect(logContent).not.toContain('spawning merger to resolve it in the rebase');
   });
 
   // Deterministic recovery: the most common real cause of a non-conflict
@@ -914,7 +914,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     await expect(syncPhaseBaseline(pipeline, deps)).resolves.toBeUndefined();
   });
 
-  it('warns but does not throw when the worktree rebase conflict cannot be resolved', async () => {
+  it('does not run the phase on a stale branch: a merger that cannot run fails the sync', async () => {
     const worktreePath = join(project.root, 'worktrees', 'conflicted-task');
     mkdirSync(worktreePath, { recursive: true });
     const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'qa-review', branch: 'feat/test' };
@@ -935,10 +935,9 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
       waitForCompletion: vi.fn().mockRejectedValue(new Error('merger failed')),
     };
 
-    await expect(syncPhaseBaseline(pipeline, deps)).resolves.toBeUndefined();
-
-    const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-    expect(logContent).toContain("Could not rebase worktree onto latest master before 'qa-review'");
+    // Conflicts are never abandoned: the merger is retried, and when it cannot run at all the phase
+    // errors out (Retry resumes it) rather than proceeding on a branch that is not up to date.
+    await expect(syncPhaseBaseline(pipeline, deps)).rejects.toMatchObject({ code: 'MERGER_SESSION_FAILED' });
   });
 });
 

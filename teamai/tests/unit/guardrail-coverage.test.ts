@@ -213,7 +213,7 @@ const CODE_ENFORCEMENT: CodeEnforcement[] = [
     signatures: ['serializeSharedFileSubtasks', 'applyPlanFileSerialization'],
   },
   // Infrastructure: teamai-workflow.md is the canonical source for long-running
-  // script guidance referenced by implement.md, qa-review.md, and merge.md.
+  // script guidance referenced by implement.md and qa-review.md.
   {
     guardrailIds: [],
     label: 'infrastructure',
@@ -235,13 +235,6 @@ const CODE_ENFORCEMENT: CodeEnforcement[] = [
     label: 'infrastructure',
     description: 'qa-review.md references teamai-workflow.md for long-running scripts',
     file: 'defaults/commands/qa-review.md',
-    signatures: ['.claude/teamai-workflow.md'],
-  },
-  {
-    guardrailIds: [],
-    label: 'infrastructure',
-    description: 'merge.md references teamai-workflow.md for long-running scripts',
-    file: 'defaults/commands/merge.md',
     signatures: ['.claude/teamai-workflow.md'],
   },
 ];

@@ -80,7 +80,7 @@ vi.mock('../../src/lib/container-manager', () => ({
   getCachedDockerAvailable: vi.fn(() => true),
 }));
 
-import { runSpecPhase, runPlanPhase, runMergePhase, rebaseOntoLatestDefault } from '../../src/lib/orchestrator/phase-runners';
+import { runSpecPhase, runPlanPhase, rebaseOntoLatestDefault } from '../../src/lib/orchestrator/phase-runners';
 import { runQaReview } from '../../src/lib/orchestrator/qa-review';
 import {
   runSubtaskSession, selectSubtasks, tryCherryPickWithRecovery, buildSyntheticReworkDescription,
@@ -620,6 +620,7 @@ describe('implement routing', () => {
       if (args[0] === 'cherry-pick' && args[1] !== '--abort') throw new Error('CONFLICT (content): Merge conflict in src/a.ts');
     });
     const execGitCapture = vi.fn(async (args: string[]) => {
+      if (mockSendMessage.mock.calls.length > 0) return '';
       if (args.includes('CHERRY_PICK_HEAD')) return 'deadbeef\n';
       if (args.includes('--diff-filter=U')) return 'src/a.ts\n';
       return '';
@@ -627,7 +628,7 @@ describe('implement routing', () => {
     const pipeline = basePipeline(ctx, 'implement');
 
     await run(() => tryCherryPickWithRecovery(
-      pipeline as never, implementDeps(ctx, { execGit, execGitCapture }) as never,
+      pipeline as never, implementDeps(ctx, { execGit, execGitCapture, waitForCompletion: vi.fn(async () => undefined) }) as never,
       join(ctx.specPath, 'output.log'), 'feat/build-the-thing-st2', 2,
     ));
 
@@ -638,37 +639,18 @@ describe('implement routing', () => {
     expect(s.cwd).toBe(ctx.worktreePath);
     expect(s.request).toContain('feat/build-the-thing-st2');
     expect(s.request).toContain('feat/build-the-thing');
-    expect(s.request).toContain('git cherry-pick --continue');
-    // The request must not make completing the cherry-pick conditional on a
-    // green suite: the command has the merger complete it and report any
-    // failure, and an unfinished cherry-pick is aborted for manual recovery.
-    expect(s.request).not.toMatch(/once the tests pass/i);
+    expect(s.request).toContain('stopped on merge conflicts');
+    // The merger only edits files: the orchestrator continues the pick itself,
+    // so the request carries no instruction to do so.
+    expect(s.request).not.toContain('--continue');
   });
 });
 
 // ── Merge sessions ─────────────────────────────────────────────────────────
 
 describe('merge routing', () => {
-  it('conflicting final merge → merge mode for the feature branch, merger at the project root', async () => {
-    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
-      if (args[0] === 'rev-list') return '0\n';
-      throw new Error('git unavailable');
-    });
-    const execGit = vi.fn((args: string[]) => {
-      if (args[0] === 'merge' && args[1] !== '--abort') throw new Error('CONFLICT');
-    });
 
-    await run(() => runMergePhase(basePipeline(ctx, 'merge') as never, cascadeDeps(ctx, { execGit }) as never));
-
-    expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    const s = sent();
-    expect(promptMode(s.message)).toBe('merge');
-    expect(s.role).toBe('merger');
-    expect(s.cwd).toBe(ctx.root);
-    expect(s.request).toContain('feat/build-the-thing');
-  });
-
-  it('rebase onto the base branch with conflicts → merge mode for origin/<base> in the worktree', async () => {
+  it('rebase onto the base branch with conflicts → resolve-rebase mode for origin/<base> in the worktree', async () => {
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
       if (args[0] === 'rev-list') return '3\n';
       if (args[0] === 'fetch') return '';
@@ -677,22 +659,22 @@ describe('merge routing', () => {
     const execGit = vi.fn((args: string[]) => {
       if (args[0] === 'rebase' && args[1] !== '--abort') throw new Error('CONFLICT');
     });
-    const execGitCapture = vi.fn(async (args: string[]) => (args.includes('--diff-filter=U') ? 'src/a.ts\n' : ''));
+    const execGitCapture = vi.fn(async (args: string[]) => (args.includes('--diff-filter=U') && mockSendMessage.mock.calls.length === 0 ? 'src/a.ts\n' : ''));
 
     await run(() => rebaseOntoLatestDefault(
       ctx.worktreePath, 'task-1', 'feat/build-the-thing', join(ctx.specPath, 'output.log'),
-      { ...cascadeDeps(ctx, { execGit, execGitCapture }), baseBranch: 'main' } as never,
+      { ...cascadeDeps(ctx, { execGit, execGitCapture, waitForCompletion: vi.fn(async () => undefined) }), baseBranch: 'main' } as never,
     ));
 
     expect(mockSendMessage).toHaveBeenCalledTimes(1);
     const s = sent();
-    expect(promptMode(s.message)).toBe('merge');
+    expect(promptMode(s.message)).toBe('resolve-rebase');
     expect(s.role).toBe('merger');
     expect(s.cwd).toBe(ctx.worktreePath);
     expect(s.request).toContain('origin/main');
   });
 
-  it('QA precheck finds the branch diverged from its own remote → merge mode for origin/<branch>', async () => {
+  it('QA precheck finds the branch diverged from its own remote → resolve-rebase mode for origin/<branch>', async () => {
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
       if (args[0] === 'fetch') return '';
       if (args[0] === 'log') return 'abc123 local commit\n';
@@ -704,14 +686,14 @@ describe('merge routing', () => {
     const gitPush = vi.fn((args: string[]) => {
       if (args[0] === 'push') throw new Error('! [rejected] (non-fast-forward)');
     });
-    const execGitCapture = vi.fn(async (args: string[]) => (args.includes('--diff-filter=U') ? 'src/a.ts\n' : ''));
+    const execGitCapture = vi.fn(async (args: string[]) => (args.includes('--diff-filter=U') && mockSendMessage.mock.calls.length === 0 ? 'src/a.ts\n' : ''));
 
     await run(() => runQaReview(
-      basePipeline(ctx, 'qa-review') as never, cascadeDeps(ctx, { gitPush, execGit, execGitCapture }) as never,
+      basePipeline(ctx, 'qa-review') as never, cascadeDeps(ctx, { gitPush, execGit, execGitCapture, waitForCompletion: vi.fn(async () => undefined) }) as never,
     ));
 
     const s = sent();
-    expect(promptMode(s.message)).toBe('merge');
+    expect(promptMode(s.message)).toBe('resolve-rebase');
     expect(s.role).toBe('merger');
     expect(s.cwd).toBe(ctx.worktreePath);
     expect(s.request).toContain('origin/feat/build-the-thing');

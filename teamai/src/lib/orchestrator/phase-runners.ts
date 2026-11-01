@@ -22,6 +22,7 @@ import { prepareBacklogCheck, runBacklogCheck, backlogCheckEnabled } from './bac
 import { log as logInfo } from '../logger';
 import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } from './wakeup';
 import { renderCommand } from '../command-templates';
+import { driveReplay, abortReplay, sleepBackoff, replayInProgress } from './replay-driver';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
 import type { TaskPipeline, SessionOptsResult } from './types';
@@ -38,38 +39,63 @@ export interface RebaseDeps {
   gitPush: (pushArgs: string[], logFile: string) => Promise<void>;
 }
 
+export type RebaseOutcome = 'clean' | 'resolved' | 'failed';
+
+/** Start attempts for a rebase that fails without conflicts (a stale lock, say) before it is reported failed. */
+const NON_CONFLICT_REBASE_ATTEMPTS = 3;
+
 /**
- * A merger session can end with its resolution staged but uncommitted — the
- * pre-commit hook rejects the commit when the branch already fails typecheck
- * or tests, which is the normal state mid-task. Pushing then publishes the
- * pre-merge HEAD and later subtasks branch from it, silently losing the
- * resolved work. Finish the merge here (hook bypassed, as repairStuckCherryPick
- * does) or report failure when conflicts remain unresolved.
+ * Rebase the worktree's branch onto `targetRef`. The branch history stays
+ * linear: nothing here ever creates a merge commit (which a later
+ * `git cherry-pick` of a subtask branch cannot replay).
  *
- * @internal — exported for unit tests only.
+ * The orchestrator runs the rebase and, when it stops on conflicts, hands the
+ * stop to `driveReplay` (replay-driver.ts): the merger is spawned only to edit
+ * the conflicted files, the project's verification is run by the orchestrator,
+ * and the merger is respawned until the stop is clean and verified — there is
+ * no cap, a rebase is expected to succeed. A rebase that fails WITHOUT
+ * conflicts has no content for an agent to resolve; it is retried a few times
+ * in case the cause is transient, then aborted (branch untouched) and
+ * reported 'failed'.
+ *
+ * 'clean' = no conflicts; 'resolved' = at least one stop was resolved.
  */
-export async function finishUnfinishedMerge(
-  deps: Pick<RebaseDeps, 'execGit' | 'execGitCapture'>,
-  worktreePath: string,
-  logDir: string,
-): Promise<boolean> {
-  try {
-    const unmerged = (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], worktreePath)).trim();
-    if (unmerged) {
-      logToOutput(logDir, `\n[WARN] Merger left ${unmerged.split('\n').length} file(s) unmerged — not pushing\n`);
-      return false;
-    }
-    const status = (await deps.execGitCapture(['status', '--porcelain', '--', '.', ':!.teamai'], worktreePath)).trim();
-    if (!status) return true;
-    logToOutput(logDir, `\n[WORKTREE] Merger left its resolution uncommitted — committing it before pushing:\n${status}\n`);
-    await deps.execGit(['add', '-A', '--', '.', ':!.teamai'], worktreePath);
-    await deps.execGit(['commit', '--no-verify', '--no-edit', '-m', 'chore: complete merge left uncommitted by merger'], worktreePath);
-    return true;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logToOutput(logDir, `\n[WARN] Could not finish merger's merge: ${msg}\n`);
-    return false;
+export async function rebaseResolvingConflicts(
+  deps: Pick<RebaseDeps, 'execGit' | 'execGitCapture' | 'sessionOpts' | 'waitForCompletion'>,
+  o: { worktreePath: string; taskId: string; projectRoot: string; targetRef: string; targetLabel: string; logDir: string; logPrefix?: string },
+): Promise<RebaseOutcome> {
+  const wt = o.worktreePath;
+  // A rebase left in progress by a pause (rate limit) is resumed, not restarted.
+  if (await replayInProgress(deps, 'rebase', wt)) {
+    logToOutput(o.logDir, '\n' + (o.logPrefix ?? '[INFO] ') + `Resuming the rebase onto ${o.targetLabel} that was left in progress\n`);
+    await driveReplay(deps, {
+      kind: 'rebase', worktreePath: wt, taskId: o.taskId, projectRoot: o.projectRoot, logDir: o.logDir,
+      logPrefix: o.logPrefix, request: `Rebasing onto: ${o.targetRef}`, resumed: true,
+    });
+    return 'resolved';
   }
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await deps.execGit(['rebase', o.targetRef], wt);
+      return 'clean';
+    } catch (rebaseErr) {
+      let unmerged = '';
+      try { unmerged = (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], wt)).trim(); } catch { /* unknown */ }
+      if (unmerged) break;
+      await abortReplay(deps, 'rebase', wt);
+      const msg = rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr);
+      logToOutput(o.logDir,
+        `\n[WARN] Rebase onto ${o.targetLabel} failed for a non-conflict reason (no unmerged files found) — ` +
+        `not spawning a merger: ${msg}\n`);
+      if (attempt >= NON_CONFLICT_REBASE_ATTEMPTS) return 'failed';
+      await sleepBackoff(attempt);
+    }
+  }
+  await driveReplay(deps, {
+    kind: 'rebase', worktreePath: wt, taskId: o.taskId, projectRoot: o.projectRoot, logDir: o.logDir,
+    logPrefix: o.logPrefix, request: `Rebasing onto: ${o.targetRef}`,
+  });
+  return 'resolved';
 }
 
 /**
@@ -96,10 +122,12 @@ export async function finishUnfinishedMerge(
  * here, host-side, via the same gh-authenticated `gitPush` every other push
  * in this codebase uses, needs no container involvement at all.
  *
- * Returns true on success (rebased/merged AND pushed). On failure, the
- * caller decides whether to throw (merge path, where unresolved conflicts
- * or an unpushed rebase would corrupt the repo) or warn (create-pr path,
- * where the PR can still be reviewed and resolved manually).
+ * Returns true on success (rebased AND pushed). Returns false when the rebase
+ * failed for a reason that is not a conflict (offline, no remote, a lock that
+ * does not clear: nothing an agent can resolve) or when only the push of the
+ * rebased branch failed. A conflict is never reported as a boolean: the merger
+ * is respawned until it is resolved, and a merger that cannot run (a
+ * MERGER_SESSION_FAILED WorktreeError), a rate limit or a stop propagate.
  */
 export async function rebaseOntoLatestDefault(
   worktreePath: string,
@@ -115,7 +143,12 @@ export async function rebaseOntoLatestDefault(
   // recovery.ts's stall sweep, which has no cleanup of its own) getting
   // interrupted before it could finish or abort cleanly. Both are safe
   // unconditional no-ops when nothing is actually in progress.
-  try { await deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* nothing to abort */ }
+  // A rebase left in progress is NOT stale: it is the pause point of a rate limit in the middle of a
+  // conflict resolution, and is resumed below (rebaseResolvingConflicts).
+  const resuming = await replayInProgress(deps, 'rebase', worktreePath);
+  if (!resuming) {
+    try { await deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* nothing to abort */ }
+  }
   try { await deps.execGit(['merge', '--abort'], worktreePath); } catch { /* nothing to abort */ }
 
   try {
@@ -131,7 +164,7 @@ export async function rebaseOntoLatestDefault(
     const count = (await deps.execGitCapture(
       ['rev-list', '--count', `HEAD..origin/${deps.baseBranch}`], worktreePath,
     )).trim();
-    if (count === '0') {
+    if (count === '0' && !resuming) {
       logToOutput(path.dirname(logFile), `\n[INFO] origin/${deps.baseBranch} has not advanced past HEAD — skipping rebase\n`);
       return true;
     }
@@ -170,7 +203,7 @@ export async function rebaseOntoLatestDefault(
   // commit's, mirroring COMMIT-GUARD's own exclusion.
   try {
     const status = (await deps.execGitCapture(['status', '--porcelain'], worktreePath)).trim();
-    if (status) {
+    if (status && !resuming) {
       await deps.execGit(['add', '-A', '--', '.', ':!.teamai'], worktreePath);
       await deps.execGit(['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before rebase'], worktreePath);
       logToOutput(path.dirname(logFile), `\n[INFO] Worktree had uncommitted changes — auto-committed before rebasing onto ${deps.baseBranch}\n`);
@@ -180,57 +213,14 @@ export async function rebaseOntoLatestDefault(
     logToOutput(path.dirname(logFile), `\n[WARN] Could not auto-commit dirty worktree before rebase: ${guardMsg}\n`);
   }
 
-  try {
-    await deps.execGit(['rebase', `origin/${deps.baseBranch}`], worktreePath);
-    logToOutput(path.dirname(logFile), `\n[INFO] Feature branch rebased onto latest ${deps.baseBranch}\n`);
-    return await pushRebased();
-  } catch (rebaseErr) {
-    // A failed `git rebase` is NOT necessarily a real conflict — the dirty-
-    // worktree case is handled deterministically above, but a stale git
-    // lock, a permission error, or any other git failure raises the exact
-    // same way and has no mechanical fix the orchestrator can apply. Check
-    // for actual unmerged paths (mid-rebase, before aborting — the abort
-    // below clears this state) before deciding a merger session is
-    // warranted. Spawning one for a non-conflict failure wastes a session
-    // on an agent that finds nothing to resolve and reports "nothing to
-    // do" — which reads as if the orchestrator lied about there being a
-    // conflict in the first place; the merger is for resolving conflicting
-    // content, not for causes it has no more ability to fix than we do.
-    let unmergedFiles = '';
-    try {
-      unmergedFiles = (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], worktreePath)).trim();
-    } catch { /* best-effort — treat as unknown, fall through to the conflict path below */ }
-    try { await deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* ignore */ }
-
-    if (!unmergedFiles) {
-      const rebaseMsg = rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr);
-      logToOutput(path.dirname(logFile),
-        `\n[WARN] Rebase onto ${deps.baseBranch} failed for a non-conflict reason (no unmerged files found) — ` +
-        `not spawning a merger: ${rebaseMsg}\n`);
-      return false;
-    }
-
-    logToOutput(path.dirname(logFile),
-      `\n[INFO] Rebase had conflicts in ${unmergedFiles.split('\n').length} file(s) — spawning merger to resolve via git merge\n`);
-    try {
-      const mergeLogFile = path.join(path.dirname(logFile), 'output-merge.log');
-      const mergeMessage = renderCommand('merge', `origin/${deps.baseBranch}`);
-      const mergeSessionId = await processManager.createSession(
-        deps.sessionOpts('merger', worktreePath, taskId, mergeLogFile),
-      );
-      updateSessionMap(path.dirname(logFile), 'merge', mergeSessionId);
-      processManager.sendMessage(mergeSessionId, mergeMessage);
-      await deps.waitForCompletion(mergeSessionId);
-      processManager.killSession(mergeSessionId);
-      if (!await finishUnfinishedMerge(deps, worktreePath, path.dirname(logFile))) return false;
-      logToOutput(path.dirname(logFile), '\n[INFO] Merger resolved rebase conflicts — pushing its result\n');
-      return await pushRebased();
-    } catch (mergeErr) {
-      const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
-      logToOutput(path.dirname(logFile), `\n[WARN] Merger could not resolve rebase conflicts: ${mergeMsg}\n`);
-      return false;
-    }
-  }
+  const outcome = await rebaseResolvingConflicts(deps, {
+    worktreePath, taskId, projectRoot: deps.projectRoot, targetRef: `origin/${deps.baseBranch}`, targetLabel: deps.baseBranch, logDir: path.dirname(logFile),
+  });
+  if (outcome === 'failed') return false;
+  logToOutput(path.dirname(logFile), outcome === 'clean'
+    ? `\n[INFO] Feature branch rebased onto latest ${deps.baseBranch}\n`
+    : '\n[INFO] Merger resolved rebase conflicts — pushing its result\n');
+  return await pushRebased();
 }
 
 // ── Dependency interfaces ──
@@ -314,6 +304,8 @@ export async function syncPhaseBaseline(
 
   if (!existsSync(pipeline.worktreePath)) return;
 
+  // The phase runs on the rebased branch or does not run: a merger that cannot run, a rate limit, a stop or a
+  // rebase failure propagate. Only a failed push of the rebased branch (below) is tolerated.
   const ok = await rebaseOntoLatestDefault(
     pipeline.worktreePath, pipeline.taskId, pipeline.branch, logFile, { ...deps, baseBranch },
   );
@@ -865,29 +857,38 @@ export async function runMergePhase(
     }
   }
 
-  // Try direct merge first — only spawn agent on conflict
-  let mergeSucceeded = false;
-  try {
-    logToOutput(pipeline.specPath, `[MERGE] Attempting direct merge of ${pipeline.branch} into ${baseBranch}\n`);
-    await deps.execGit(['merge', pipeline.branch, '--no-edit'], deps.projectRoot);
-    mergeSucceeded = true;
-    logToOutput(pipeline.specPath, `[MERGE] Direct merge succeeded — no conflicts\n`);
-  } catch {
-    try { await deps.execGit(['merge', '--abort'], deps.projectRoot); } catch { /* best-effort */ }
-    logToOutput(pipeline.specPath, `[MERGE] Merge had conflicts — spawning merger agent\n`);
-  }
-
-  if (!mergeSucceeded) {
-    const mergeLogFile = path.join(pipeline.specPath, 'output-merge.log');
-    const mergeMessage = renderCommand('merge', pipeline.branch);
-    const sessionId = await processManager.createSession(
-      deps.sessionOpts('merger', deps.projectRoot, pipeline.taskId, mergeLogFile),
-    );
-    pipeline.sessionId = sessionId;
-    updateSessionMap(pipeline.specPath, 'merge', sessionId);
-    processManager.sendMessage(sessionId, mergeMessage);
-    await deps.waitForCompletion(sessionId);
-    processManager.killSession(sessionId);
+  // Land the branch on the base WITHOUT a merge commit: it was just rebased
+  // onto the base, so this is a fast-forward. If the base moved in the
+  // meantime, rebase again (the merger is only involved for conflicts) and
+  // retry. Everything here is deterministic orchestrator code.
+  const maxLandAttempts = 3;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      logToOutput(pipeline.specPath, `[MERGE] Fast-forwarding ${baseBranch} to ${pipeline.branch}\n`);
+      await deps.execGit(['merge', '--ff-only', pipeline.branch], deps.projectRoot);
+      logToOutput(pipeline.specPath, `[MERGE] Fast-forward succeeded\n`);
+      break;
+    } catch (ffErr) {
+      const ffMsg = ffErr instanceof Error ? ffErr.message : String(ffErr);
+      if (attempt >= maxLandAttempts) {
+        throw new PipelineConfigError(
+          `Could not fast-forward ${baseBranch} to ${pipeline.branch} after ${maxLandAttempts} attempts: ${ffMsg}`,
+          'MERGE_NOT_FAST_FORWARD',
+        );
+      }
+      logToOutput(pipeline.specPath,
+        `[MERGE] ${baseBranch} is not an ancestor of ${pipeline.branch} (attempt ${attempt}/${maxLandAttempts}) — rebasing again\n`);
+      const reRebased = await rebaseOntoLatestDefault(
+        pipeline.worktreePath, pipeline.taskId, pipeline.branch, logFile,
+        { projectRoot: deps.projectRoot, execGit: deps.execGit, execGitCapture: deps.execGitCapture, gitPush: deps.gitPush, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
+      );
+      if (!reRebased) {
+        throw new PipelineConfigError(
+          `Rebase onto latest ${baseBranch} failed with conflicts that could not be resolved.`,
+          'REBASE_CONFLICT_UNRESOLVABLE',
+        );
+      }
+    }
   }
 
   await deps.removeWorktree(pipeline.taskId);

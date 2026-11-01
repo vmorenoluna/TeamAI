@@ -26,6 +26,12 @@ export interface SensorsConfig {
   post_subtask?: SensorConfig[];
   /** Run before the merge phase (in the worktree). Failure blocks the merge. */
   pre_merge?: SensorConfig[];
+  /**
+   * Run (in the worktree) after the merger resolves a conflicting rebase or cherry-pick stop, before the
+   * operation is continued. Failure sends the merger back with the output. Falls back to `pre_merge`
+   * when unset; when neither is configured the merger is told to run the project's tests itself.
+   */
+  post_integration?: SensorConfig[];
   /** Run when a sensor or phase fails (in the worktree). Best-effort — failures are logged but never block. */
   on_failure?: SensorConfig[];
 }
@@ -224,7 +230,7 @@ export function readPipelineSensors(pipelineConfig: Record<string, unknown>): Se
   const raw = pipelineConfig.sensors as Record<string, unknown>;
   const result: SensorsConfig = {};
 
-  for (const hook of ['pre_subtask', 'post_subtask', 'pre_merge', 'on_failure'] as const) {
+  for (const hook of ['pre_subtask', 'post_subtask', 'pre_merge', 'post_integration', 'on_failure'] as const) {
     const arr = raw[hook];
     if (Array.isArray(arr)) {
       const sensors: SensorConfig[] = [];

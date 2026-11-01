@@ -161,11 +161,6 @@ const CONTRACT: Partial<Record<AgentMode, Rule[]>> = {
     r('run verification from the worktree', 'Run from the worktree'),
     r('stable acceptance-criterion id on every criteria entry', '"id": "AC'),
   ],
-  'merge': [
-    r('adopt the injected role persona', 'Adopt the role persona'),
-    r('never push from the agent', 'Do NOT push'),
-    r('stage the merge for review before committing', '--no-commit'),
-  ],
   'spec-summary': [
     r('adopt the injected role persona', 'Adopt the role persona'),
     r('summary length and focus', 'Roughly 3–8 lines of plain prose'),
@@ -175,11 +170,21 @@ const CONTRACT: Partial<Record<AgentMode, Rule[]>> = {
   'resolve-cherry-pick': [
     r('adopt the injected role persona', 'Adopt the role persona'),
     r('never push from the agent', 'Do NOT push'),
-    r('tests run before the cherry-pick is completed', 'Do NOT run `git cherry-pick --continue` yet'),
-    r('remaining test failures are reported, never hidden', 'state clearly in your summary which tests fail'),
-    r('only an unresolvable conflict is left unfinished', 'Leave the cherry-pick unfinished only if'),
-    r('non-interactive continue', 'GIT_EDITOR=true git -c core.hooksPath=/dev/null cherry-pick --continue'),
-    r('a failing project hook never leaves the pick unfinished', 'Do NOT leave the'),
+    r('the orchestrator drives the cherry-pick; the agent never continues it', 'Do NOT run `git cherry-pick --continue`'),
+    r('verification failures come back to the merger', 'reports a verification failure'),
+    r('an unrelated failure is declared, not fixed', 'integration_checks_waiver.md'),
+    r('without a configured check the merger runs the tests itself', 'suite ONCE yourself'),
+    r('unresolved files are left for another round', 'the orchestrator then asks again'),
+  ],
+  'resolve-rebase': [
+    r('adopt the injected role persona', 'Adopt the role persona'),
+    r('never push from the agent', 'Do NOT push'),
+    r('the orchestrator drives the rebase; the agent never continues it', 'Do NOT run `git rebase --continue`'),
+    r('a merge commit would break the linear history', 'a merge commit would break the linear branch history'),
+    r('verification failures come back to the merger', 'reports a verification failure'),
+    r('an unrelated failure is declared, not fixed', 'integration_checks_waiver.md'),
+    r('without a configured check the merger runs the tests itself', 'suite ONCE yourself'),
+    r('unresolved files are left for another round', 'the orchestrator then asks again'),
   ],
 };
 
