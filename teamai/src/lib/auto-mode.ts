@@ -423,6 +423,13 @@ function _tick(projectRoot: string, state: AutoProjectState): void {
         state.startingIds.delete(task.id);
         return;
       }
+      if (err instanceof OrchestratorError && err.code === 'CONTAINER_ENGINE_UNSUPPORTED') {
+        // Docker serves Windows containers while container mode is enabled — a gate the user must resolve
+        // (switch to Linux containers or disable container mode), not a task failure.
+        log('auto-mode', `Task ${task.id} blocked — ${err.message}`);
+        state.startingIds.delete(task.id);
+        return;
+      }
       if (err instanceof OrchestratorError && err.code === 'CONTAINER_INVALID') {
         // Container failed validation — a gate, not a task failure. The task
         // stays in the backlog; the persisted result now pauses the tick.

@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, rm
 import path from 'path';
 import { processManager } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath, checkDockerAvailable } from './container-manager';
+import { getDockerEngineProblem } from './container-engine';
 import { TaskStore } from './task-store';
 import { slugify } from './utils';
 import { assertNotApiProcess } from './process-role';
@@ -16,7 +17,7 @@ import { finalizeSupersededTickets } from './orchestrator/backlog-check';
 import { appendSessionTicket, synthesizeDoneTicket } from './history-session';
 import { gitPush } from './orchestrator/git-push';
 import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
-import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, OrchestratorError, SessionKilledError, ContainerDockerMissingError } from './orchestrator/errors';
+import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, OrchestratorError, SessionKilledError, ContainerDockerMissingError, ContainerEngineUnsupportedError } from './orchestrator/errors';
 import { NO_RESUME_PHASES } from '@/constants/phases';
 import { runImplement, _recoverStBranchCommits } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
@@ -365,6 +366,8 @@ export class Orchestrator {
     const containerCfg = readContainerConfig(this.projectRoot);
     if (containerCfg.enabled) {
       if (!(await checkDockerAvailable()) && !(await checkDockerAvailable({ force: true }))) {
+        // Running but serving Windows containers: starting Docker would not help, say what would.
+        if (getDockerEngineProblem() === 'windows') throw new ContainerEngineUnsupportedError(this.projectRoot);
         processManager.emit('container-docker-missing', { projectRoot: this.projectRoot });
         throw new ContainerDockerMissingError(this.projectRoot);
       }
@@ -629,6 +632,7 @@ export class Orchestrator {
       const containerCfg = readContainerConfig(this.projectRoot);
       if (containerCfg.enabled) {
         if (!(await checkDockerAvailable()) && !(await checkDockerAvailable({ force: true }))) {
+          if (getDockerEngineProblem() === 'windows') throw new ContainerEngineUnsupportedError(this.projectRoot);
           processManager.emit('container-docker-missing', { projectRoot: this.projectRoot });
           throw new ContainerDockerMissingError(this.projectRoot);
         }

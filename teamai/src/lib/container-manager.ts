@@ -5,6 +5,7 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import { warn as logWarn, log } from './logger';
 import { getToolPath } from './tool-checker';
+import { getDockerEngineProblem, setDockerEngineProblem } from './container-engine';
 import { assertNotApiProcess } from './process-role';
 import { logToOutput } from './orchestrator/helpers';
 
@@ -87,6 +88,7 @@ export function _resetDockerAvailableCache(): void {
   cache.value = null;
   cache.checkedAt = 0;
   cache.inFlight = null;
+  setDockerEngineProblem(null);
 }
 
 function probeDocker(cache: DockerAvailabilityCache): Promise<boolean> {
@@ -94,9 +96,17 @@ function probeDocker(cache: DockerAvailabilityCache): Promise<boolean> {
   const self: { probe?: Promise<boolean> } = {};
   const probe = (async () => {
     let available: boolean;
+    let unsupported: 'windows' | null = null;
     try {
-      await execFileAsync(getToolPath('docker'), ['info'], { timeout: 2000 });
-      available = true;
+      const { stdout } = await execFileAsync(getToolPath('docker'), ['info', '--format', '{{.OSType}}'], { timeout: 2000 });
+      const osType = String(stdout ?? '').trim().toLowerCase();
+      unsupported = osType === 'windows' ? 'windows' : null;
+      available = unsupported === null;
+      if (unsupported && getDockerEngineProblem() !== 'windows') {
+        logWarn('container',
+          'Docker is serving Windows containers, which container mode does not support (it needs Linux containers). ' +
+          'Switch Docker Desktop to Linux containers to use container mode; running without a container.');
+      }
     } catch (err) {
       available = false;
       // Only log on first failure to avoid spamming every 60s on retry
@@ -104,6 +114,7 @@ function probeDocker(cache: DockerAvailabilityCache): Promise<boolean> {
     }
     // A reset while the probe was running orphans it — don't repopulate the cache.
     if (cache.inFlight === self.probe) {
+      setDockerEngineProblem(unsupported);
       cache.value = available;
       cache.checkedAt = available ? 0 : Date.now();
       if (available && wasCachedNegative) log('container', 'Docker is now available — container mode re-enabled');

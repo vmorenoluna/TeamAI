@@ -107,6 +107,21 @@ export class ContainerDockerMissingError extends OrchestratorError {
   }
 }
 
+/**
+ * Thrown when container mode is explicitly enabled but Docker serves Windows containers. Container mode needs
+ * Linux containers (it relies on `sh`, POSIX paths and a devcontainer remoteUser).
+ */
+export class ContainerEngineUnsupportedError extends OrchestratorError {
+  constructor(projectRoot: string) {
+    super(
+      `Container mode is enabled for ${projectRoot} but Docker is serving Windows containers, which container mode does not support. ` +
+      'Switch Docker Desktop to Linux containers, or disable container mode in Settings.',
+      'CONTAINER_ENGINE_UNSUPPORTED',
+    );
+    this.name = 'ContainerEngineUnsupportedError';
+  }
+}
+
 /** Thrown when a Claude CLI session was terminated by a signal (SIGTERM/SIGKILL).
  *  A killed session is never a successful completion — this error propagates
  *  through the pipeline so the task advances to 'failed' rather than hanging

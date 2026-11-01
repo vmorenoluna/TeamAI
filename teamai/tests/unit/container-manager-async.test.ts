@@ -44,6 +44,7 @@ import {
   readContainerConfig,
   _resetDockerAvailableCache,
 } from '../../src/lib/container-manager';
+import { getDockerEngineProblem } from '../../src/lib/container-engine';
 
 // ── Helpers ──
 
@@ -132,7 +133,7 @@ describe('checkDockerAvailable cache semantics', () => {
     dockerReplies({ info: new Error('boom') });
     await expect(checkDockerAvailable()).resolves.toBe(false);
     const opts = mockExecFile.mock.calls[0][2] as { timeout: number };
-    expect(mockExecFile.mock.calls[0][1]).toEqual(['info']);
+    expect(mockExecFile.mock.calls[0][1]).toEqual(['info', '--format', '{{.OSType}}']);
     expect(opts.timeout).toBe(2000);
     expect(mockLogWarn).toHaveBeenCalledWith('container', 'docker info check failed', expect.any(Error));
   });
@@ -171,6 +172,45 @@ describe('checkDockerAvailable cache semantics', () => {
     await checkDockerAvailable();
     await checkDockerAvailable({ force: true });
     expect(mockLogWarn.mock.calls.filter(c => c[1] === 'docker info check failed')).toHaveLength(1);
+  });
+
+  describe('container engine OS', () => {
+    it('a Linux engine is available and reports no problem', async () => {
+      dockerReplies({ info: 'linux' });
+      expect(await checkDockerAvailable()).toBe(true);
+      expect(getDockerEngineProblem()).toBeNull();
+    });
+
+    it('an engine that reports no OS (older Docker, mocks) is treated as available', async () => {
+      dockerReplies({ info: '' });
+      expect(await checkDockerAvailable()).toBe(true);
+      expect(getDockerEngineProblem()).toBeNull();
+    });
+
+    it('a Windows-container engine is unavailable for container mode, with the reason recorded', async () => {
+      dockerReplies({ info: 'windows' });
+      expect(await checkDockerAvailable()).toBe(false);
+      expect(getDockerEngineProblem()).toBe('windows');
+      // the default (auto) container mode therefore stays off instead of failing later
+      expect(readContainerConfig('/no/such/project').enabled).toBe(false);
+    });
+
+    it('warns about Windows containers once, and says what to do', async () => {
+      dockerReplies({ info: 'windows' });
+      await checkDockerAvailable();
+      await checkDockerAvailable({ force: true });
+      const warns = mockLogWarn.mock.calls.filter(c => String(c[1]).includes('Windows containers'));
+      expect(warns).toHaveLength(1);
+      expect(String(warns[0][1])).toContain('Switch Docker Desktop to Linux containers');
+    });
+
+    it('recovers when Docker is switched back to Linux containers', async () => {
+      dockerReplies({ info: 'windows' });
+      expect(await checkDockerAvailable()).toBe(false);
+      dockerReplies({ info: 'linux' });
+      expect(await checkDockerAvailable({ force: true })).toBe(true);
+      expect(getDockerEngineProblem()).toBeNull();
+    });
   });
 
   it('AC4: force re-probes even when cached', async () => {

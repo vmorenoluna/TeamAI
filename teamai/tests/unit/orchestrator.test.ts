@@ -86,7 +86,8 @@ import { Orchestrator, getOrchestrator } from '../../src/lib/orchestrator';
 import { getToolPath } from '../../src/lib/tool-checker';
 import { processManager } from '../../src/lib/process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath, checkDockerAvailable, readContainerRemoteUser } from '../../src/lib/container-manager';
-import { ContainerDockerMissingError, OrchestratorError } from '../../src/lib/orchestrator/errors';
+import { ContainerDockerMissingError, ContainerEngineUnsupportedError, OrchestratorError } from '../../src/lib/orchestrator/errors';
+import { setDockerEngineProblem } from '../../src/lib/container-engine';
 
 const fireEvent = createFireEvent(onHandlers);
 
@@ -211,6 +212,25 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
 
       await expect(orch.runTask(testData.taskId, 'test', 'spec')).rejects.toThrow(ContainerDockerMissingError);
+    });
+
+    it('throws ContainerEngineUnsupportedError (not "Docker is not running") when Docker serves Windows containers', async () => {
+      testData = setupTestProject();
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(checkDockerAvailable).mockResolvedValue(false);
+      setDockerEngineProblem('windows');
+      mockEmit.mockClear();
+      try {
+        const orch = makeOrch(testData.root, getOrchestrator);
+        const err = await orch.runTask(testData.taskId, 'test', 'spec').catch((e: unknown) => e) as OrchestratorError;
+        expect(err).toBeInstanceOf(ContainerEngineUnsupportedError);
+        expect(err.code).toBe('CONTAINER_ENGINE_UNSUPPORTED');
+        expect(err.message).toContain('Linux containers');
+        // starting Docker would not help, so the "start Docker" dialog is not raised
+        expect(mockEmit).not.toHaveBeenCalledWith('container-docker-missing', expect.anything());
+      } finally {
+        setDockerEngineProblem(null);
+      }
     });
 
     it('emits container-docker-missing event before throwing in runTask', async () => {
