@@ -16,7 +16,6 @@ import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
 import { addWorktreeWithRetry } from '../utils/git-worktree';
-import { renderCommand } from '../../src/lib/command-templates';
 
 // ── Hoisted mocks ────────────────────────────────────────────────────────────
 
@@ -248,13 +247,13 @@ describe('CreatePR Conflict Resolution Integration', () => {
     await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, { timeout: 10_000 });
 
     // Verify the merger agent was spawned
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('resolve-rebase', 'origin/master'));
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', expect.stringContaining('Rebasing onto: origin/master'));
 
     // Simulate the merger agent resolving the conflict INSIDE the rebase the
-    // orchestrator left stopped (never via git merge — the history stays linear):
+    // orchestrator left stopped. It only edits and stages the file: the
+    // orchestrator continues the rebase itself (never a merge — the history stays linear).
     writeFileSync(join(worktreePath, 'conflict.txt'), 'RESOLVED BY MERGER\n');
     execFileSync('git', ['add', 'conflict.txt'], { cwd: worktreePath, stdio: 'ignore' });
-    execFileSync('git', ['-c', 'core.editor=true', 'rebase', '--continue'], { cwd: worktreePath, stdio: 'ignore' });
 
     // Complete the merger session
     fireEvent('event', { sessionId: 'sess-merge', event: { type: 'result' } });
@@ -269,7 +268,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
 
   // ── Test 2: Real conflict → merger fails → graceful fallback ────────────────
 
-  it('falls back gracefully when merger agent cannot resolve conflicts', async () => {
+  it('respawns the merger when its session fails, until the conflict is resolved', async () => {
     const worktreePath = createFeatureWorktree();
 
     // Feature branch change
@@ -284,8 +283,8 @@ describe('CreatePR Conflict Resolution Integration', () => {
     execFileSync('git', ['push', 'origin', 'master'], { cwd: projectDir, stdio: 'ignore' });
     execFileSync('git', ['fetch', 'origin', 'master'], { cwd: projectDir, stdio: 'ignore' });
 
-    // Only one session: merger (no PR session)
-    mockCreateSession.mockResolvedValue('sess-merge');
+    // Two merger sessions: the first one dies, the second resolves the conflict
+    mockCreateSession.mockResolvedValueOnce('sess-merge-1').mockResolvedValueOnce('sess-merge-2');
 
     const pipeline = {
       taskId,
@@ -299,17 +298,22 @@ describe('CreatePR Conflict Resolution Integration', () => {
     };
     // gh pr create will fail in test env — catch the error
     const promise = (orch as AnyOrch).runCreatePR(pipeline).catch(() => { /* best-effort */ });
-    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, { timeout: 10_000 });
+    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(1); }, { timeout: 10_000 });
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-1', expect.stringContaining('Rebasing onto: origin/master'));
 
-    // Verify merger was spawned
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('resolve-rebase', 'origin/master'));
+    // The first merger session fails with a non-zero exit...
+    fireEvent('exit', { sessionId: 'sess-merge-1', code: 1 });
 
-    // Simulate merger failure — exit with non-zero code
-    fireEvent('exit', { sessionId: 'sess-merge', code: 1 });
+    // ...so the orchestrator spawns another one for the same, still unresolved, conflict
+    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); }, { timeout: 10_000 });
+    expect(mockSendMessage).toHaveBeenLastCalledWith('sess-merge-2', expect.stringContaining('Rebasing onto: origin/master'));
+    writeFileSync(join(worktreePath, 'conflict.txt'), 'RESOLVED BY MERGER\n');
+    execFileSync('git', ['add', 'conflict.txt'], { cwd: worktreePath, stdio: 'ignore' });
+    fireEvent('event', { sessionId: 'sess-merge-2', event: { type: 'result' } });
     await promise;
 
-    // Only one session created (merger only, no PR session)
-    expect(mockCreateSession).toHaveBeenCalledTimes(1);
+    // Two merger sessions, no PR session
+    expect(mockCreateSession).toHaveBeenCalledTimes(2);
   }, 30_000);
 
   // ── Test 3: Clean rebase → no sessions spawned ────────────────────────────────
@@ -346,7 +350,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
     // Should NOT have sent the merge command for origin/master (no rebase conflict)
     const sendCalls = mockSendMessage.mock.calls as any[][];
     const mergeCalls = sendCalls.filter(
-      (c) => c[1] && typeof c[1] === 'string' && c[1] === renderCommand('resolve-rebase', 'origin/master'),
+      (c) => c[1] && typeof c[1] === 'string' && c[1].includes('Rebasing onto: origin/master'),
     );
     expect(mergeCalls.length).toBe(0);
 

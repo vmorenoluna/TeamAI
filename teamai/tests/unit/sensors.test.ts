@@ -87,6 +87,11 @@ describe('readPipelineSensors', () => {
     expect(readPipelineSensors({ sensors: 42 })).toBeUndefined();
   });
 
+  it('reads the post_integration hook run after a conflicting rebase or cherry-pick stop', () => {
+    expect(readPipelineSensors({ sensors: { post_integration: ['npm test', { command: 'npm run lint' }] } }))
+      .toEqual({ post_integration: [{ command: 'npm test' }, { command: 'npm run lint' }] });
+  });
+
   it('returns undefined when sensors object has no valid hooks', () => {
     expect(readPipelineSensors({ sensors: {} })).toBeUndefined();
     expect(readPipelineSensors({ sensors: { unrelated: true } })).toBeUndefined();

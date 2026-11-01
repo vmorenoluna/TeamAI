@@ -97,7 +97,6 @@ import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrato
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
 import { warn as mockWarn } from '../../src/lib/logger';
-import { renderCommand } from '../../src/lib/command-templates';
 
 const fireEvent = createFireEvent(onHandlers);
 
@@ -611,7 +610,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(1);
     }, WAIT);
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('resolve-rebase', 'origin/feat/robustness-test'));
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', expect.stringContaining('Rebasing onto: origin/feat/robustness-test'));
     fireEvent('event', { sessionId: 'sess-merge', event: { type: 'result' } });
 
     // Then the QA session, once the orchestrator has pushed the merger's result
@@ -628,7 +627,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
 
     expect(pushCalls).toBe(2);
     const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-    expect(logContent).toContain('spawning merger to resolve them in the rebase');
+    expect(logContent).toContain('spawning merger to resolve it in the rebase');
     expect(logContent).toContain('Merger resolved divergence from origin/feat/robustness-test');
     expect(logContent).toContain('Pushed the reconciled branch after merger resolution — remote matches worktree');
   });
@@ -6983,7 +6982,7 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
     expect(containerManager.ensureContainer).not.toHaveBeenCalled();
 
     // Now simulate merger resolving the conflict
-    deps.execGitCapture = vi.fn(async () => { throw new Error('not found'); });
+    deps.execGitCapture = vi.fn(async () => '');
     mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
     resolveCompletion!();
     const result = await resultPromise;

@@ -14,6 +14,7 @@ import { processManager, type AgentSession } from '../process-manager';
 import { syncPhaseBaseline, rebaseResolvingConflicts } from './phase-runners';
 import { readJsonFile } from '../json-io';
 import { RateLimitError } from './rate-limit';
+import { WorktreeError } from './errors';
 import { prepareBacklogCheck, runBacklogCheck, backlogCheckEnabled } from './backlog-check';
 import { TaskStore } from '../task-store';
 import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } from './wakeup';
@@ -159,10 +160,19 @@ async function reconcileDivergedBranch(
     logToOutput(pipeline.specPath, `[QA-PRECHECK] Could not auto-commit dirty worktree before rebase: ${guardMsg}\n`);
   }
 
-  const outcome = await rebaseResolvingConflicts(deps, {
-    worktreePath: pipeline.worktreePath, taskId: pipeline.taskId, targetRef, targetLabel: targetRef,
-    logDir: pipeline.specPath, logPrefix: '[QA-PRECHECK] ',
-  });
+  let outcome: Awaited<ReturnType<typeof rebaseResolvingConflicts>>;
+  try {
+    outcome = await rebaseResolvingConflicts(deps, {
+      worktreePath: pipeline.worktreePath, taskId: pipeline.taskId, projectRoot: deps.projectRoot, targetRef, targetLabel: targetRef,
+      logDir: pipeline.specPath, logPrefix: '[QA-PRECHECK] ',
+    });
+  } catch (err) {
+    // A merger that cannot run at all is reported through the precheck's own FAIL report; a rate
+    // limit or a stop still propagates.
+    if (!(err instanceof WorktreeError && err.code === 'MERGER_SESSION_FAILED')) throw err;
+    logToOutput(pipeline.specPath, `[QA-PRECHECK] Merger could not resolve rebase conflicts: ${err.message}\n`);
+    return 'failed';
+  }
   if (outcome === 'failed') {
     logToOutput(pipeline.specPath, `[QA-PRECHECK] Could not rebase onto ${targetRef}\n`);
     return 'failed';

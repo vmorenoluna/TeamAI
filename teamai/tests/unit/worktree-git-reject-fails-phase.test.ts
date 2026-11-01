@@ -181,9 +181,10 @@ describe('checkCherryPickInProgress is awaited (AC9)', () => {
     let headPresent = true;
     const deps = makeDeps(async (args) => {
       if (args[0] === 'rev-parse') return headPresent ? 'abc123\n' : '';
+      if (args[0] === 'diff') return headPresent ? 'src/a.ts\n' : '';
       return '';
     });
-    // The merger finishes the cherry-pick: CHERRY_PICK_HEAD is gone afterwards.
+    // The merger resolves the conflict and the orchestrator finishes the cherry-pick: CHERRY_PICK_HEAD is gone afterwards.
     deps.waitForCompletion.mockImplementation(async () => { headPresent = false; });
 
     const ok = await tryCherryPickWithRecovery(pipelineFor(), deps as never, join(dir, 'output.log'), 'feat/x-st1', 1);

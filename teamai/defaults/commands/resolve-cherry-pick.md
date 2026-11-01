@@ -3,6 +3,10 @@ Adopt the role persona already loaded in your system prompt.
 
 You are resolving the conflicts left by a `git cherry-pick` of a parallel subtask's
 commits onto the task's feature branch. The conflict markers are already in the files.
+Your job is to resolve the conflicts in those files and leave them correct. The
+orchestrator does everything else — it stages your result, runs the project's
+verification, continues the cherry-pick and pushes — and calls you again if conflicts
+remain or its verification fails.
 
 ## Request
 
@@ -13,30 +17,21 @@ $ARGUMENTS
    understand the intent of both sides of every conflict.
 2. Resolve all conflicts semantically — preserve the intent of BOTH sets of changes.
    Apply your role's merge-direction preference rule where intents genuinely conflict.
-3. `git add` the resolved files. Do NOT run `git cherry-pick --continue` yet.
-4. Run the project's test suite ONCE and wait for it to complete — do NOT re-run it
-   repeatedly. Capture only the pass/fail summary line — do not read the full test output
-   into context unless a failure requires diagnosis. See `.claude/teamai-workflow.md` for
-   full guidance on long-running scripts.
-5. If tests fail:
-   - A failure caused by your resolution → fix the resolution, `git add` it, and re-run
-     the suite once.
-   - A failure unrelated to the conflicted files (it also fails on the feature branch as
-     it stood before this cherry-pick) → note it in your summary; it does not block you.
-   - If failures your resolution caused remain after that, still complete the
-     cherry-pick (step 6), and state clearly in your summary which tests fail and why —
-     QA reviews the integrated branch and routes the failure back for a fix. Never
-     report the resolution as clean when tests fail.
-6. Complete the cherry-pick non-interactively, with project git hooks disabled:
-   `GIT_EDITOR=true git -c core.hooksPath=/dev/null cherry-pick --continue`. This is an
-   intermediate integration commit of a multi-subtask branch, not a deliverable: the
-   branch can legitimately fail the pre-commit hook (typecheck/tests) until later
-   subtasks land, and QA is the quality gate for the integrated result. Do NOT leave the
-   cherry-pick unfinished because a hook would reject it — an unfinished pick is aborted
-   and fails the task. If it stops on another conflicting commit from the same range, repeat steps 1–6 for
-   that commit. Leave the cherry-pick unfinished only if you could not resolve the
-   conflicts at all — the orchestrator then aborts it and preserves both branches for
-   manual recovery.
-7. **Do NOT push.** The orchestrator pushes the feature branch itself, host-side —
+   Remove every conflict marker and leave each file in a coherent, buildable state.
+3. `git add` each resolved file. Leave a file unstaged and unresolved only if you truly
+   could not resolve it — the orchestrator then asks again.
+4. If the request above reports a verification failure, it is the output of the project's
+   checks run on your previous resolution. Fix what your resolution broke. If the failure
+   is unrelated to the files you resolved (it also fails on the feature branch as it
+   stood before this cherry-pick), do not touch unrelated code: write a short explanation
+   to `$TEAMAI_SPEC_DIR/integration_checks_waiver.md` and the orchestrator will proceed.
+   If the request says no verification command is configured, run the project's test
+   suite ONCE yourself as described there. See `.claude/teamai-workflow.md` for guidance
+   on long-running scripts.
+5. Do NOT run `git cherry-pick --continue`, `--skip` or `--abort`, do NOT run `git merge`,
+   and do NOT commit: the orchestrator drives the cherry-pick itself (the branch can
+   legitimately fail project hooks at an intermediate commit, and QA gates the integrated
+   result).
+6. **Do NOT push.** The orchestrator pushes the feature branch itself, host-side —
    pushing from the agent sandbox will fail for lack of credentials and wastes calls.
-8. Print a summary of the conflicts resolved and the test results.
+7. Print a short summary of the conflicts you resolved and any you left.

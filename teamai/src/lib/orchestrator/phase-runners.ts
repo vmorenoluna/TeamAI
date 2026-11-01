@@ -22,7 +22,7 @@ import { prepareBacklogCheck, runBacklogCheck, backlogCheckEnabled } from './bac
 import { log as logInfo } from '../logger';
 import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } from './wakeup';
 import { renderCommand } from '../command-templates';
-import { RateLimitError } from './rate-limit';
+import { driveReplay, abortReplay, sleepBackoff } from './replay-driver';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
 import type { TaskPipeline, SessionOptsResult } from './types';
@@ -39,131 +39,54 @@ export interface RebaseDeps {
   gitPush: (pushArgs: string[], logFile: string) => Promise<void>;
 }
 
-/** True while a `git rebase` is stopped mid-way in the worktree. */
-async function rebaseInProgress(
-  deps: Pick<RebaseDeps, 'execGitCapture'>, worktreePath: string,
-): Promise<boolean> {
-  for (const dir of ['rebase-merge', 'rebase-apply']) {
-    try {
-      const p = (await deps.execGitCapture(['rev-parse', '--git-path', dir], worktreePath)).trim();
-      if (p && existsSync(path.resolve(worktreePath, p))) return true;
-    } catch { /* treat as not in progress */ }
-  }
-  return false;
-}
-
-/**
- * Abort a rebase left in progress, restoring the branch to its pre-rebase tip.
- * Best-effort and a no-op when nothing is in progress.
- */
-export async function abortRebase(
-  deps: Pick<RebaseDeps, 'execGit'>, worktreePath: string,
-): Promise<void> {
-  try { await deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* nothing to abort */ }
-}
-
 export type RebaseOutcome = 'clean' | 'resolved' | 'failed';
 
-/** Merger sessions allowed on a single conflicting stop before the rebase is given up. */
-export const MAX_REBASE_RESOLVER_SESSIONS_PER_STOP = 5;
-/** Safety bound on the number of stops one rebase may be driven through. */
-const MAX_REBASE_STEPS = 1000;
+/** Start attempts for a rebase that fails without conflicts (a stale lock, say) before it is reported failed. */
+const NON_CONFLICT_REBASE_ATTEMPTS = 3;
 
 /**
- * Rebase the worktree's branch onto `targetRef`, resolving conflicts with the
- * merger agent. The branch history stays linear: nothing here ever creates a
- * merge commit (which a later `git cherry-pick` of a subtask branch cannot
- * replay).
+ * Rebase the worktree's branch onto `targetRef`. The branch history stays
+ * linear: nothing here ever creates a merge commit (which a later
+ * `git cherry-pick` of a subtask branch cannot replay).
  *
- * Everything deterministic is done by the orchestrator: it starts the rebase,
- * stages the resolution, continues (hooks bypassed — QA is the quality gate)
- * and skips a commit that became empty. The merger is spawned only for a stop
- * that has conflicts, and only to edit the conflicted files; while that stop
- * still has unmerged files after a session, a fresh merger is spawned again
- * (up to MAX_REBASE_RESOLVER_SESSIONS_PER_STOP). If the conflicts cannot be
- * resolved, or the rebase fails for a reason that is not a conflict, it is
- * aborted — restoring the branch untouched — and 'failed' is returned.
+ * The orchestrator runs the rebase and, when it stops on conflicts, hands the
+ * stop to `driveReplay` (replay-driver.ts): the merger is spawned only to edit
+ * the conflicted files, the project's verification is run by the orchestrator,
+ * and the merger is respawned until the stop is clean and verified — there is
+ * no cap, a rebase is expected to succeed. A rebase that fails WITHOUT
+ * conflicts has no content for an agent to resolve; it is retried a few times
+ * in case the cause is transient, then aborted (branch untouched) and
+ * reported 'failed'.
  *
- * 'clean' = no conflicts; 'resolved' = at least one conflict was resolved.
+ * 'clean' = no conflicts; 'resolved' = at least one stop was resolved.
  */
 export async function rebaseResolvingConflicts(
   deps: Pick<RebaseDeps, 'execGit' | 'execGitCapture' | 'sessionOpts' | 'waitForCompletion'>,
-  o: { worktreePath: string; taskId: string; targetRef: string; targetLabel: string; logDir: string; logPrefix?: string },
+  o: { worktreePath: string; taskId: string; projectRoot: string; targetRef: string; targetLabel: string; logDir: string; logPrefix?: string },
 ): Promise<RebaseOutcome> {
-  const { worktreePath: wt, logDir } = o;
-  const prefix = o.logPrefix ?? '[INFO] ';
-  const unmergedFiles = async () =>
-    (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], wt)).trim();
-  const fail = async (): Promise<RebaseOutcome> => { await abortRebase(deps, wt); return 'failed'; };
-
-  try {
-    await deps.execGit(['rebase', o.targetRef], wt);
-    return 'clean';
-  } catch (rebaseErr) {
-    // A failed `git rebase` is NOT necessarily a conflict: a stale git lock or a
-    // permission error raises the same way and has no mechanical fix. Spawning
-    // a merger for it would waste a session on an agent that finds nothing to
-    // resolve, so only a stop with actual unmerged paths warrants one.
-    let unmerged = '';
-    try { unmerged = await unmergedFiles(); } catch { /* treat as unknown */ }
-    if (!unmerged) {
+  const wt = o.worktreePath;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await deps.execGit(['rebase', o.targetRef], wt);
+      return 'clean';
+    } catch (rebaseErr) {
+      let unmerged = '';
+      try { unmerged = (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], wt)).trim(); } catch { /* unknown */ }
+      if (unmerged) break;
+      await abortReplay(deps, 'rebase', wt);
       const msg = rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr);
-      logToOutput(logDir,
+      logToOutput(o.logDir,
         `\n[WARN] Rebase onto ${o.targetLabel} failed for a non-conflict reason (no unmerged files found) — ` +
         `not spawning a merger: ${msg}\n`);
-      return fail();
+      if (attempt >= NON_CONFLICT_REBASE_ATTEMPTS) return 'failed';
+      await sleepBackoff(attempt);
     }
   }
-
-  let attemptsOnStop = 0;
-  try {
-    for (let step = 0; step < MAX_REBASE_STEPS; step++) {
-      const unmerged = await unmergedFiles();
-      if (unmerged) {
-        if (attemptsOnStop >= MAX_REBASE_RESOLVER_SESSIONS_PER_STOP) {
-          logToOutput(logDir,
-            `\n[WARN] ${unmerged.split('\n').length} file(s) still unmerged after ${attemptsOnStop} merger session(s) — aborting the rebase\n`);
-          return fail();
-        }
-        attemptsOnStop++;
-        logToOutput(logDir,
-          `\n${prefix}Rebase had conflicts in ${unmerged.split('\n').length} file(s) — spawning merger to resolve them in the rebase` +
-          ` (session ${attemptsOnStop}/${MAX_REBASE_RESOLVER_SESSIONS_PER_STOP})\n`);
-        const mergeLogFile = path.join(logDir, 'output-merge.log');
-        const sessionId = await processManager.createSession(
-          deps.sessionOpts('merger', wt, o.taskId, mergeLogFile),
-        );
-        updateSessionMap(logDir, 'merge', sessionId);
-        processManager.sendMessage(sessionId, renderCommand('resolve-rebase', o.targetRef));
-        await deps.waitForCompletion(sessionId);
-        processManager.killSession(sessionId);
-        continue;
-      }
-
-      // No conflicts at this stop: the orchestrator finishes it itself.
-      if (!(await rebaseInProgress(deps, wt))) return 'resolved';
-      await deps.execGit(['add', '-A', '--', '.', ':!.teamai'], wt);
-      attemptsOnStop = 0;
-      try {
-        await deps.execGit(['-c', 'core.editor=true', '-c', 'core.hooksPath=/dev/null', 'rebase', '--continue'], wt);
-      } catch {
-        // Either the next commit conflicts (handled at the top of the loop) or
-        // the replayed commit became empty after the resolution: skip it.
-        if (!(await unmergedFiles()) && await rebaseInProgress(deps, wt)) {
-          logToOutput(logDir, `\n${prefix}Replayed commit is empty after the resolution — skipping it\n`);
-          await deps.execGit(['rebase', '--skip'], wt);
-        }
-      }
-    }
-    logToOutput(logDir, `\n[WARN] Rebase still in progress after ${MAX_REBASE_STEPS} steps — aborting it\n`);
-    return fail();
-  } catch (err) {
-    await abortRebase(deps, wt);
-    if (err instanceof RateLimitError) throw err;
-    const msg = err instanceof Error ? err.message : String(err);
-    logToOutput(logDir, `\n[WARN] Merger could not resolve rebase conflicts: ${msg}\n`);
-    return 'failed';
-  }
+  await driveReplay(deps, {
+    kind: 'rebase', worktreePath: wt, taskId: o.taskId, projectRoot: o.projectRoot, logDir: o.logDir,
+    logPrefix: o.logPrefix, request: `Rebasing onto: ${o.targetRef}`,
+  });
+  return 'resolved';
 }
 
 /**
@@ -275,7 +198,7 @@ export async function rebaseOntoLatestDefault(
   }
 
   const outcome = await rebaseResolvingConflicts(deps, {
-    worktreePath, taskId, targetRef: `origin/${deps.baseBranch}`, targetLabel: deps.baseBranch, logDir: path.dirname(logFile),
+    worktreePath, taskId, projectRoot: deps.projectRoot, targetRef: `origin/${deps.baseBranch}`, targetLabel: deps.baseBranch, logDir: path.dirname(logFile),
   });
   if (outcome === 'failed') return false;
   logToOutput(path.dirname(logFile), outcome === 'clean'
@@ -365,9 +288,16 @@ export async function syncPhaseBaseline(
 
   if (!existsSync(pipeline.worktreePath)) return;
 
-  const ok = await rebaseOntoLatestDefault(
-    pipeline.worktreePath, pipeline.taskId, pipeline.branch, logFile, { ...deps, baseBranch },
-  );
+  let ok = false;
+  try {
+    ok = await rebaseOntoLatestDefault(
+      pipeline.worktreePath, pipeline.taskId, pipeline.branch, logFile, { ...deps, baseBranch },
+    );
+  } catch (err) {
+    // This sync is best-effort freshness (the rebase before merge/PR is the one that must succeed), so a
+    // merger that cannot even run does not fail the phase. A rate limit or a stop still propagates.
+    if (!(err instanceof WorktreeError && err.code === 'MERGER_SESSION_FAILED')) throw err;
+  }
   if (!ok) {
     logToOutput(pipeline.specPath,
       `\n[WARN] Could not rebase worktree onto latest ${baseBranch} before '${pipeline.phase}' — proceeding with the worktree's current state.\n`);

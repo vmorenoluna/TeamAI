@@ -26,3 +26,6 @@ if (!process.env.TEAMAI_CONFIG_DIR || !process.env.TEAMAI_TEST_FORBIDDEN_CONFIG)
     '(refusing to run against the real ~/.teamai).',
   );
 }
+
+// No real waiting between merger-session retries in tests (orchestrator/replay-driver.ts).
+process.env.TEAMAI_REPLAY_BACKOFF_MS = '0';
