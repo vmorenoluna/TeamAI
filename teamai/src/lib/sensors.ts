@@ -3,6 +3,8 @@ import { promisify } from 'util';
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from 'fs';
 import path from 'path';
 import { warn } from './logger';
+import { getToolPath } from './tool-checker';
+import { randomUUID } from 'crypto';
 
 const execFileAsync = promisify(execFile);
 
@@ -67,6 +69,38 @@ export interface SensorRunResult {
 const DEFAULT_TIMEOUT_MS = 120_000; // 2 minutes
 const MAX_OUTPUT_CHARS = 4096; // cap stdout/stderr in reports
 
+// ── Containerised runs ────────────────────────────────────────────────────
+
+/** Environment variable that tags every process of one containerised sensor run. */
+const RUN_TAG = 'TEAMAI_SENSOR_RUN';
+
+/**
+ * Shell that signals every process (children and grandchildren included) whose environment carries the
+ * run's tag. Each process inherits the tag from the shell `docker exec` started, so this finds the whole
+ * tree, with no dependency on `timeout`, `pkill` or process groups. It does not match itself: the id is
+ * in its script text, not in its environment.
+ */
+function killScript(runId: string): string {
+  const sweep = (sig: string) =>
+    `for d in /proc/[0-9]*; do if tr '\\0' '\\n' < "$d/environ" 2>/dev/null | grep -qx '${RUN_TAG}=${runId}'; then kill -${sig} "\${d#/proc/}" 2>/dev/null; fi; done`;
+  return `${sweep('TERM')}; sleep 3; ${sweep('KILL')}`;
+}
+
+/** Best-effort: stop what a timed-out containerised sensor left running inside the container. */
+async function killContainerRun(
+  c: NonNullable<Parameters<typeof runSensors>[2]['container']>, runId: string,
+): Promise<void> {
+  try {
+    await execFileAsync(
+      getToolPath('docker'),
+      ['exec', '-u', c.user, c.containerId, 'sh', '-c', killScript(runId)],
+      { timeout: 30_000 },
+    );
+  } catch (err) {
+    warn('sensors', 'Could not stop the timed-out sensor inside the container', err);
+  }
+}
+
 // ── Sensor execution engine ───────────────────────────────────────────────
 
 /**
@@ -91,6 +125,11 @@ export async function runSensors(
     files: string[];
     subtaskId?: number;
     logFile?: string;
+    /**
+     * Run the command inside this container (`docker exec`) instead of on the host. For checks that need
+     * the toolchain the agents use, which in container mode lives in the container.
+     */
+    container?: { containerId: string; user: string; cwd: string; mapPath: (hostPath: string) => string };
   },
 ): Promise<SensorRunResult> {
   if (!sensors || sensors.length === 0) {
@@ -125,22 +164,33 @@ export async function runSensors(
       passed: false,
     };
 
+    // Tags every process of a containerised run so the whole tree can be found again to be killed.
+    const runId = randomUUID();
+    const c = params.container;
     try {
-      const { stdout, stderr } = await execFileAsync(
-        process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh'),
-        [process.platform === 'win32' ? '/c' : '-c', sensor.command],
-        {
-          cwd: params.cwd,
-          timeout,
-          env: {
-            ...process.env,
-            SENSOR_FILES: filesList,
-            SENSOR_OUTPUT: outputPath,
-            SENSOR_CWD: params.cwd,
+      const envVars = { SENSOR_FILES: filesList, SENSOR_OUTPUT: outputPath, SENSOR_CWD: params.cwd };
+      const { stdout, stderr } = c
+        ? await execFileAsync(
+          getToolPath('docker'),
+          [
+            'exec', '-u', c.user, '-w', c.cwd,
+            ...Object.entries({ ...envVars, SENSOR_OUTPUT: c.mapPath(outputPath), SENSOR_CWD: c.cwd })
+              .flatMap(([k, v]) => ['-e', `${k}=${v}`]),
+            '-e', `${RUN_TAG}=${runId}`,
+            c.containerId, 'sh', '-c', sensor.command,
+          ],
+          { timeout, maxBuffer: 1024 * 1024 },
+        )
+        : await execFileAsync(
+          process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh'),
+          [process.platform === 'win32' ? '/c' : '-c', sensor.command],
+          {
+            cwd: params.cwd,
+            timeout,
+            env: { ...process.env, ...envVars },
+            maxBuffer: 1024 * 1024, // 1 MB
           },
-          maxBuffer: 1024 * 1024, // 1 MB
-        },
-      );
+        );
 
       report.exitCode = 0;
       report.stdout = stdout.slice(0, MAX_OUTPUT_CHARS);
@@ -155,6 +205,12 @@ export async function runSensors(
         stderr?: string;
         message?: string;
       };
+
+      // Killing the `docker exec` client does not stop the process it started inside the container
+      // (a timed-out `sbt test` would keep running and hold its locks): stop the whole tree there.
+      if (c && (execErr.killed || execErr.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER')) {
+        await killContainerRun(c, runId);
+      }
 
       if (execErr.killed) {
         report.error = `Sensor timed out after ${timeout}ms`;
