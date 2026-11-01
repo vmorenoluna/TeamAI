@@ -15,7 +15,7 @@ import { syncPhaseBaseline, rebaseResolvingConflicts } from './phase-runners';
 import { replayInProgress } from './replay-driver';
 import { readJsonFile } from '../json-io';
 import { RateLimitError } from './rate-limit';
-import { WorktreeError } from './errors';
+import { WorktreeError, SessionKilledError } from './errors';
 import { prepareBacklogCheck, runBacklogCheck, backlogCheckEnabled } from './backlog-check';
 import { TaskStore } from '../task-store';
 import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } from './wakeup';
@@ -165,22 +165,18 @@ async function reconcileDivergedBranch(
     logToOutput(pipeline.specPath, `[QA-PRECHECK] Could not auto-commit dirty worktree before rebase: ${guardMsg}\n`);
   }
 
-  let outcome: Awaited<ReturnType<typeof rebaseResolvingConflicts>>;
-  try {
-    outcome = await rebaseResolvingConflicts(deps, {
-      worktreePath: pipeline.worktreePath, taskId: pipeline.taskId, projectRoot: deps.projectRoot, targetRef, targetLabel: targetRef,
-      logDir: pipeline.specPath, logPrefix: '[QA-PRECHECK] ',
-    });
-  } catch (err) {
-    // A merger that cannot run at all is reported through the precheck's own FAIL report; a rate
-    // limit or a stop still propagates.
-    if (!(err instanceof WorktreeError && err.code === 'MERGER_SESSION_FAILED')) throw err;
-    logToOutput(pipeline.specPath, `[QA-PRECHECK] Merger could not resolve rebase conflicts: ${err.message}\n`);
-    return 'failed';
-  }
+  // QA must verify the FINAL shape of the branch, so a reconcile that cannot complete is never turned into a
+  // QA verdict: a merger that cannot run (MERGER_SESSION_FAILED), a rate limit or a stop propagates, and a
+  // rebase that fails for a non-conflict reason fails the phase (Retry resumes it).
+  const outcome = await rebaseResolvingConflicts(deps, {
+    worktreePath: pipeline.worktreePath, taskId: pipeline.taskId, projectRoot: deps.projectRoot, targetRef, targetLabel: targetRef,
+    logDir: pipeline.specPath, logPrefix: '[QA-PRECHECK] ',
+  });
   if (outcome === 'failed') {
-    logToOutput(pipeline.specPath, `[QA-PRECHECK] Could not rebase onto ${targetRef}\n`);
-    return 'failed';
+    throw new WorktreeError(
+      `Could not rebase onto ${targetRef} (the failure is not a conflict — see output.log); QA needs the reconciled branch.`,
+      'QA_RECONCILE_FAILED',
+    );
   }
   if (outcome === 'clean') {
     logToOutput(pipeline.specPath, `[QA-PRECHECK] Rebased onto ${targetRef}\n`);
@@ -467,7 +463,11 @@ async function runQaReviewRound(
         }
       }
     }
-  } catch { /* branch doesn't exist on remote */ }
+  } catch (err) {
+    // Only "the branch doesn't exist on the remote" is benign here. A rate limit, a stop or a failed
+    // reconcile means the branch is not in its final shape and must not be swallowed into a QA verdict.
+    if (err instanceof RateLimitError || err instanceof WorktreeError || err instanceof SessionKilledError) throw err;
+  }
 
   if (hasUnpushed) {
     const failReport: QaReport = {

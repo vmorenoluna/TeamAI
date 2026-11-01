@@ -914,7 +914,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     await expect(syncPhaseBaseline(pipeline, deps)).resolves.toBeUndefined();
   });
 
-  it('warns but does not throw when the worktree rebase conflict cannot be resolved', async () => {
+  it('does not run the phase on a stale branch: a merger that cannot run fails the sync', async () => {
     const worktreePath = join(project.root, 'worktrees', 'conflicted-task');
     mkdirSync(worktreePath, { recursive: true });
     const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'qa-review', branch: 'feat/test' };
@@ -935,10 +935,9 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
       waitForCompletion: vi.fn().mockRejectedValue(new Error('merger failed')),
     };
 
-    await expect(syncPhaseBaseline(pipeline, deps)).resolves.toBeUndefined();
-
-    const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-    expect(logContent).toContain("Could not rebase worktree onto latest master before 'qa-review'");
+    // Conflicts are never abandoned: the merger is retried, and when it cannot run at all the phase
+    // errors out (Retry resumes it) rather than proceeding on a branch that is not up to date.
+    await expect(syncPhaseBaseline(pipeline, deps)).rejects.toMatchObject({ code: 'MERGER_SESSION_FAILED' });
   });
 });
 

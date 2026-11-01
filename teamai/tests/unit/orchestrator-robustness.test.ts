@@ -632,7 +632,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     expect(logContent).toContain('Pushed the reconciled branch after merger resolution — remote matches worktree');
   });
 
-  it('falls through to the FAIL report when reconciliation cannot resolve the divergence', async () => {
+  it('errors out instead of writing a QA verdict when the merger cannot run during reconciliation', async () => {
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (args && args[0] === 'fetch') return '';
       if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
@@ -649,22 +649,14 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     // Merger session itself fails to even start
     mockCreateSession.mockRejectedValue(new Error('session creation failed'));
 
-    // qaStallCount starts at 2, the pipeline-written round makes it 3 which equals maxQaAttempts (3),
-    // so it goes directly to 'failed' without bouncing back to implement — same pattern
-    // as the pre-existing "writes FAIL report..." test above.
-    const pipeline = makePipeline(project.taskId, project.taskDir, { qaStallCount: 2 });
+    const pipeline = makePipeline(project.taskId, project.taskDir, { qaStallCount: 0 });
 
-    await (orch as AnyOrch).runQaReview(pipeline);
+    // QA verifies the final shape of the branch: when the merger cannot even run, the phase errors out
+    // (Retry resumes it) instead of recording a QA verdict about a branch that is not reconciled.
+    await expect((orch as AnyOrch).runQaReview(pipeline)).rejects.toMatchObject({ code: 'MERGER_SESSION_FAILED' });
 
-    const reportPath = join(project.taskDir, 'qa_report.json');
-    const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
-    expect(report.overall).toBe('FAIL');
-    expect(report.criteria[0].name).toBe('Unpushed commits');
-
-    expect(pipeline.phase).toBe('failed');
-
-    const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-    expect(logContent).toContain('Merger could not resolve rebase conflicts');
+    expect(existsSync(join(project.taskDir, 'qa_report.json'))).toBe(false);
+    expect(pipeline.qaStallCount).toBe(0);
   });
 
   // ── Post-merger push failure ──

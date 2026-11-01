@@ -122,10 +122,12 @@ export async function rebaseResolvingConflicts(
  * here, host-side, via the same gh-authenticated `gitPush` every other push
  * in this codebase uses, needs no container involvement at all.
  *
- * Returns true on success (rebased/merged AND pushed). On failure, the
- * caller decides whether to throw (merge path, where unresolved conflicts
- * or an unpushed rebase would corrupt the repo) or warn (create-pr path,
- * where the PR can still be reviewed and resolved manually).
+ * Returns true on success (rebased AND pushed). Returns false when the rebase
+ * failed for a reason that is not a conflict (offline, no remote, a lock that
+ * does not clear: nothing an agent can resolve) or when only the push of the
+ * rebased branch failed. A conflict is never reported as a boolean: the merger
+ * is respawned until it is resolved, and a merger that cannot run (a
+ * MERGER_SESSION_FAILED WorktreeError), a rate limit or a stop propagate.
  */
 export async function rebaseOntoLatestDefault(
   worktreePath: string,
@@ -302,16 +304,11 @@ export async function syncPhaseBaseline(
 
   if (!existsSync(pipeline.worktreePath)) return;
 
-  let ok = false;
-  try {
-    ok = await rebaseOntoLatestDefault(
-      pipeline.worktreePath, pipeline.taskId, pipeline.branch, logFile, { ...deps, baseBranch },
-    );
-  } catch (err) {
-    // This sync is best-effort freshness (the rebase before merge/PR is the one that must succeed), so a
-    // merger that cannot even run does not fail the phase. A rate limit or a stop still propagates.
-    if (!(err instanceof WorktreeError && err.code === 'MERGER_SESSION_FAILED')) throw err;
-  }
+  // The phase runs on the rebased branch or does not run: a merger that cannot run, a rate limit, a stop or a
+  // rebase failure propagate. Only a failed push of the rebased branch (below) is tolerated.
+  const ok = await rebaseOntoLatestDefault(
+    pipeline.worktreePath, pipeline.taskId, pipeline.branch, logFile, { ...deps, baseBranch },
+  );
   if (!ok) {
     logToOutput(pipeline.specPath,
       `\n[WARN] Could not rebase worktree onto latest ${baseBranch} before '${pipeline.phase}' — proceeding with the worktree's current state.\n`);
