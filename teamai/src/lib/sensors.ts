@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from 'fs';
 import path from 'path';
 import { warn } from './logger';
+import { getToolPath } from './tool-checker';
 
 const execFileAsync = promisify(execFile);
 
@@ -91,6 +92,11 @@ export async function runSensors(
     files: string[];
     subtaskId?: number;
     logFile?: string;
+    /**
+     * Run the command inside this container (`docker exec`) instead of on the host. For checks that need
+     * the toolchain the agents use, which in container mode lives in the container.
+     */
+    container?: { containerId: string; user: string; cwd: string; mapPath: (hostPath: string) => string };
   },
 ): Promise<SensorRunResult> {
   if (!sensors || sensors.length === 0) {
@@ -126,21 +132,29 @@ export async function runSensors(
     };
 
     try {
-      const { stdout, stderr } = await execFileAsync(
-        process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh'),
-        [process.platform === 'win32' ? '/c' : '-c', sensor.command],
-        {
-          cwd: params.cwd,
-          timeout,
-          env: {
-            ...process.env,
-            SENSOR_FILES: filesList,
-            SENSOR_OUTPUT: outputPath,
-            SENSOR_CWD: params.cwd,
+      const envVars = { SENSOR_FILES: filesList, SENSOR_OUTPUT: outputPath, SENSOR_CWD: params.cwd };
+      const c = params.container;
+      const { stdout, stderr } = c
+        ? await execFileAsync(
+          getToolPath('docker'),
+          [
+            'exec', '-u', c.user, '-w', c.cwd,
+            ...Object.entries({ ...envVars, SENSOR_OUTPUT: c.mapPath(outputPath), SENSOR_CWD: c.cwd })
+              .flatMap(([k, v]) => ['-e', `${k}=${v}`]),
+            c.containerId, 'sh', '-c', sensor.command,
+          ],
+          { timeout, maxBuffer: 1024 * 1024 },
+        )
+        : await execFileAsync(
+          process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh'),
+          [process.platform === 'win32' ? '/c' : '-c', sensor.command],
+          {
+            cwd: params.cwd,
+            timeout,
+            env: { ...process.env, ...envVars },
+            maxBuffer: 1024 * 1024, // 1 MB
           },
-          maxBuffer: 1024 * 1024, // 1 MB
-        },
-      );
+        );
 
       report.exitCode = 0;
       report.stdout = stdout.slice(0, MAX_OUTPUT_CHARS);
