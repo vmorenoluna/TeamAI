@@ -15,8 +15,8 @@
  * failing checks.
  *
  * Failure policy for the session itself: a rate limit or a user stop propagates
- * (the operation is aborted so the worktree is left clean and the phase can be
- * resumed); a session that crashes, stalls or cannot start is retried with a
+ * (a rate limit leaves a rebase in progress, to be resumed once the allowance is
+ * back; a stop aborts the operation so the worktree is left clean); a session that crashes, stalls or cannot start is retried with a
  * growing backoff, and only after `replayConfig.maxConsecutiveSessionFailures`
  * in a row does the driver throw a WorktreeError — an infrastructure problem
  * that more merger sessions cannot fix, surfaced loudly rather than looping.
@@ -51,6 +51,8 @@ export interface ReplayOptions {
   /** Text handed to the merger command as $ARGUMENTS (e.g. the ref being rebased onto). */
   request: string;
   logPrefix?: string;
+  /** The operation was left in progress by an earlier pause and is being resumed. */
+  resumed?: boolean;
   /** Overrides the sensors read from the project's pipeline config (tests). */
   sensors?: SensorConfig[];
 }
@@ -176,7 +178,9 @@ export async function driveReplay(deps: ReplayDeps, o: ReplayOptions): Promise<v
   const sensors = sensorsFor(o);
   const label = o.kind === 'rebase' ? 'rebase' : 'cherry-pick';
 
-  let conflictsAtStop = false;       // a merger has touched the current stop
+  // A merger has touched the current stop. A resumed operation (paused by a rate limit mid-resolution)
+  // may hold a resolution that was never verified, so its current stop counts as touched.
+  let conflictsAtStop = !!o.resumed;
   let failureReport: string | null = null;
   let sessions = 0;
   let sessionFailures = 0;
@@ -193,13 +197,13 @@ export async function driveReplay(deps: ReplayDeps, o: ReplayOptions): Promise<v
         `resolved (it fails on the base too), write a short explanation to \`$TEAMAI_SPEC_DIR/${CHECKS_WAIVER_FILE}\` ` +
         'instead.\n\n' + failureReport;
     }
+    let sessionId: string | undefined;
     try {
       const mergeLogFile = path.join(o.logDir, 'output-merge.log');
-      const sessionId = await processManager.createSession(deps.sessionOpts('merger', wt, o.taskId, mergeLogFile));
+      sessionId = await processManager.createSession(deps.sessionOpts('merger', wt, o.taskId, mergeLogFile));
       updateSessionMap(o.logDir, 'merge', sessionId);
       processManager.sendMessage(sessionId, renderCommand(COMMAND_FOR[o.kind], request));
       await deps.waitForCompletion(sessionId);
-      processManager.killSession(sessionId);
       sessionFailures = 0;
     } catch (err) {
       if (err instanceof RateLimitError) throw err;
@@ -215,6 +219,9 @@ export async function driveReplay(deps: ReplayDeps, o: ReplayOptions): Promise<v
         );
       }
       await sleepBackoff(sessionFailures);
+    } finally {
+      // Never leave a merger process behind, whatever ended the session (including a rate limit).
+      if (sessionId) processManager.killSession(sessionId);
     }
   };
 
@@ -255,7 +262,10 @@ export async function driveReplay(deps: ReplayDeps, o: ReplayOptions): Promise<v
     }
     throw new WorktreeError(`${label} still in progress after ${replayConfig.maxSteps} steps`, 'REPLAY_STEP_LIMIT');
   } catch (err) {
-    await abortReplay(deps, o.kind, wt);
+    // A rate limit PAUSES the task: a rebase is left exactly as it is (the merger's partial
+    // resolution included) and resumed from this state when the allowance is back. A cherry-pick
+    // is aborted instead — its subtask branch keeps the commits and is re-integrated on resume.
+    if (!(err instanceof RateLimitError && o.kind === 'rebase')) await abortReplay(deps, o.kind, wt);
     throw err;
   }
 }

@@ -22,7 +22,7 @@ import { prepareBacklogCheck, runBacklogCheck, backlogCheckEnabled } from './bac
 import { log as logInfo } from '../logger';
 import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } from './wakeup';
 import { renderCommand } from '../command-templates';
-import { driveReplay, abortReplay, sleepBackoff } from './replay-driver';
+import { driveReplay, abortReplay, sleepBackoff, replayInProgress } from './replay-driver';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
 import type { TaskPipeline, SessionOptsResult } from './types';
@@ -65,6 +65,15 @@ export async function rebaseResolvingConflicts(
   o: { worktreePath: string; taskId: string; projectRoot: string; targetRef: string; targetLabel: string; logDir: string; logPrefix?: string },
 ): Promise<RebaseOutcome> {
   const wt = o.worktreePath;
+  // A rebase left in progress by a pause (rate limit) is resumed, not restarted.
+  if (await replayInProgress(deps, 'rebase', wt)) {
+    logToOutput(o.logDir, '\n' + (o.logPrefix ?? '[INFO] ') + `Resuming the rebase onto ${o.targetLabel} that was left in progress\n`);
+    await driveReplay(deps, {
+      kind: 'rebase', worktreePath: wt, taskId: o.taskId, projectRoot: o.projectRoot, logDir: o.logDir,
+      logPrefix: o.logPrefix, request: `Rebasing onto: ${o.targetRef}`, resumed: true,
+    });
+    return 'resolved';
+  }
   for (let attempt = 1; ; attempt++) {
     try {
       await deps.execGit(['rebase', o.targetRef], wt);
@@ -132,7 +141,12 @@ export async function rebaseOntoLatestDefault(
   // recovery.ts's stall sweep, which has no cleanup of its own) getting
   // interrupted before it could finish or abort cleanly. Both are safe
   // unconditional no-ops when nothing is actually in progress.
-  try { await deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* nothing to abort */ }
+  // A rebase left in progress is NOT stale: it is the pause point of a rate limit in the middle of a
+  // conflict resolution, and is resumed below (rebaseResolvingConflicts).
+  const resuming = await replayInProgress(deps, 'rebase', worktreePath);
+  if (!resuming) {
+    try { await deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* nothing to abort */ }
+  }
   try { await deps.execGit(['merge', '--abort'], worktreePath); } catch { /* nothing to abort */ }
 
   try {
@@ -148,7 +162,7 @@ export async function rebaseOntoLatestDefault(
     const count = (await deps.execGitCapture(
       ['rev-list', '--count', `HEAD..origin/${deps.baseBranch}`], worktreePath,
     )).trim();
-    if (count === '0') {
+    if (count === '0' && !resuming) {
       logToOutput(path.dirname(logFile), `\n[INFO] origin/${deps.baseBranch} has not advanced past HEAD — skipping rebase\n`);
       return true;
     }
@@ -187,7 +201,7 @@ export async function rebaseOntoLatestDefault(
   // commit's, mirroring COMMIT-GUARD's own exclusion.
   try {
     const status = (await deps.execGitCapture(['status', '--porcelain'], worktreePath)).trim();
-    if (status) {
+    if (status && !resuming) {
       await deps.execGit(['add', '-A', '--', '.', ':!.teamai'], worktreePath);
       await deps.execGit(['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before rebase'], worktreePath);
       logToOutput(path.dirname(logFile), `\n[INFO] Worktree had uncommitted changes — auto-committed before rebasing onto ${deps.baseBranch}\n`);

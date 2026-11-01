@@ -226,11 +226,38 @@ describe('driveReplay', () => {
       expect(g.flat()).toContain('rebase --abort');
     });
 
-    it('propagates a rate limit, leaving the worktree clean', async () => {
+    it('pauses on a rate limit: the rebase is left in progress, with the merger session killed', async () => {
       const g = scriptedGit([1], { started: true });
       g.deps.waitForCompletion.mockRejectedValueOnce(new RateLimitError(123));
       await expect(g.drive()).rejects.toBeInstanceOf(RateLimitError);
-      expect(g.flat()).toContain('rebase --abort');
+      expect(g.flat()).not.toContain('rebase --abort');
+      expect(g.flat().some(c => c.includes('--continue'))).toBe(false);
+      const { processManager } = await import('../../src/lib/process-manager');
+      expect(processManager.killSession).toHaveBeenCalledWith('sess');
+    });
+
+    it('resumes the paused rebase instead of restarting it, and verifies the unverified resolution', async () => {
+      // the merger had resolved the stop (nothing unmerged) before the rate limit hit
+      const g = scriptedGit([0, 0], { started: true });
+      runSensors.mockResolvedValue({ allPassed: true, reports: [] });
+      await g.drive({ resumed: true, sensors: [{ command: 'npm test' }] });
+      expect(runSensors).toHaveBeenCalledTimes(1);
+      expect(g.flat().filter(c => c.includes('--continue'))).toHaveLength(2);
+      expect(g.flat()).not.toContain('rebase --abort');
+    });
+
+    it('rebaseResolvingConflicts picks up a rebase left in progress without starting a new one', async () => {
+      const g = scriptedGit([1], { started: true });
+      expect(await g.rebase()).toBe('resolved');
+      expect(g.deps.execGit.mock.calls.some(c => c[0][0] === 'rebase' && c[0][1] === 'origin/main')).toBe(false);
+      expect(sent).toHaveLength(1);
+    });
+
+    it('aborts a cherry-pick on a rate limit; its subtask branch is re-integrated on resume', async () => {
+      const g = scriptedGit([1], { kind: 'cherry-pick', started: true });
+      g.deps.waitForCompletion.mockRejectedValueOnce(new RateLimitError(123));
+      await expect(g.drive()).rejects.toBeInstanceOf(RateLimitError);
+      expect(g.flat()).toContain('cherry-pick --abort');
     });
   });
 });

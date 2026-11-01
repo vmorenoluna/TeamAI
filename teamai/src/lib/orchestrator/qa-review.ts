@@ -12,6 +12,7 @@ import { humanDirectiveFor, consumeFeedbackIfDue } from './human-feedback';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
 import { syncPhaseBaseline, rebaseResolvingConflicts } from './phase-runners';
+import { replayInProgress } from './replay-driver';
 import { readJsonFile } from '../json-io';
 import { RateLimitError } from './rate-limit';
 import { WorktreeError } from './errors';
@@ -141,7 +142,11 @@ async function reconcileDivergedBranch(
   // killed mid-`git merge` by recovery.ts's stall sweep, most concretely) —
   // see rebaseOntoLatestDefault's matching guard (phase-runners.ts) for the
   // full rationale. Safe unconditional no-ops when nothing is in progress.
-  try { await deps.execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
+  // A rebase in progress is the pause point of a rate limit mid-resolution: it is resumed, not reset.
+  const resuming = await replayInProgress(deps, 'rebase', pipeline.worktreePath);
+  if (!resuming) {
+    try { await deps.execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
+  }
   try { await deps.execGit(['merge', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
 
   // `git rebase` refuses to start against a dirty worktree — not a content
@@ -150,7 +155,7 @@ async function reconcileDivergedBranch(
   // matching guard (phase-runners.ts) for the full rationale.
   try {
     const status = (await deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath)).trim();
-    if (status) {
+    if (status && !resuming) {
       await deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
       await deps.execGit(['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before rebase'], pipeline.worktreePath);
       logToOutput(pipeline.specPath, `[QA-PRECHECK] Worktree had uncommitted changes — auto-committed before rebasing onto ${targetRef}\n`);

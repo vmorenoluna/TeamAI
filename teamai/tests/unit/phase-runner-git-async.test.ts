@@ -303,7 +303,8 @@ describe('AC4: rebaseOntoLatestDefault', () => {
     const p = rebaseOntoLatestDefault(dir, 't', 'feat/x', logFile, makeDeps()).then(r => { done = true; return r; });
     expect(await eventLoopTurn()).toBe(true);
     expect(done).toBe(false);
-    expect(execGitCapture).not.toHaveBeenCalled();
+    // Only the "is a rebase left in progress?" probe runs before the fetch; the rev-list count waits for it.
+    expect(execGitCapture.mock.calls.every(([a]) => a[0] === 'rev-parse')).toBe(true);
 
     fetchGate.resolve('');
     expect(await p).toBe(true);
