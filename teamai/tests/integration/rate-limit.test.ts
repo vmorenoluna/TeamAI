@@ -16,7 +16,6 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
-import { renderCommand } from '../../src/lib/command-templates';
 
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
 
@@ -955,11 +954,19 @@ describe('Rate Limit Integration', () => {
 
       // _commitArtifactsToWorktree now calls execFileSync('git', ...) directly
       // (not through _execGit), so we need mockExecFileSync to handle git calls.
-      // Mock _execGit: throw on 'merge' so runMergePhase spawns a merger agent;
-      // all other git commands (rebase, removeWorktree, etc.) succeed as no-ops.
+      // Mock git so the pre-merge rebase stops on a conflict and the orchestrator
+      // spawns a merger agent for it (the merge itself is a plain fast-forward);
+      // the conflict is gone once the merger has been sent its request.
       vi.spyOn(orch, '_execGit').mockImplementation((...callArgs: unknown[]) => {
         const gitArgs = callArgs[0] as string[];
-        if (gitArgs[0] === 'merge') throw new Error('simulated merge conflict');
+        if (gitArgs[0] === 'rebase' && !gitArgs.includes('--abort')) throw new Error('simulated rebase conflict');
+      });
+      vi.spyOn(orch, '_execGitCapture').mockImplementation(async (...callArgs: unknown[]) => {
+        const gitArgs = callArgs[0] as string[];
+        if (gitArgs[0] === 'diff' && gitArgs.includes('--diff-filter=U')) {
+          return mockSendMessage.mock.calls.length > 0 ? '' : 'src/conflicted-file.ts\n';
+        }
+        return '';
       });
 
       const pipeline = makePipeline({ phase: 'merge' });
@@ -977,9 +984,9 @@ describe('Rate Limit Integration', () => {
 
       await new Promise(r => setTimeout(r, 50));
 
-      // runMerge should have created a session with merger role and /merge command
+      // runMerge should have created a merger session to resolve the rebase conflict
       expect(mockCreateSession).toHaveBeenCalledTimes(1);
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-1', expect.stringContaining('/merge'));
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-1', expect.stringContaining('resolve-rebase'));
 
       // Fire rate limit events for the merge session
       fireEvent('event', {
@@ -1014,11 +1021,19 @@ describe('Rate Limit Integration', () => {
     it('merge resume completes and advances to done', async () => {
       mkdirSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true });
 
-      // Mock _execGit: throw on 'merge' so runMergePhase spawns a merger agent;
-      // all other git commands (rebase, removeWorktree, etc.) succeed as no-ops.
+      // Mock git so the pre-merge rebase stops on a conflict and the orchestrator
+      // spawns a merger agent for it (the merge itself is a plain fast-forward);
+      // the conflict is gone once the merger has been sent its request.
       vi.spyOn(orch, '_execGit').mockImplementation((...callArgs: unknown[]) => {
         const gitArgs = callArgs[0] as string[];
-        if (gitArgs[0] === 'merge') throw new Error('simulated merge conflict');
+        if (gitArgs[0] === 'rebase' && !gitArgs.includes('--abort')) throw new Error('simulated rebase conflict');
+      });
+      vi.spyOn(orch, '_execGitCapture').mockImplementation(async (...callArgs: unknown[]) => {
+        const gitArgs = callArgs[0] as string[];
+        if (gitArgs[0] === 'diff' && gitArgs.includes('--diff-filter=U')) {
+          return mockSendMessage.mock.calls.length > 0 ? '' : 'src/conflicted-file.ts\n';
+        }
+        return '';
       });
 
       const pipeline = makePipeline({ phase: 'merge' });
@@ -1034,7 +1049,7 @@ describe('Rate Limit Integration', () => {
 
       await new Promise(r => setTimeout(r, 50));
 
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-done', expect.stringContaining('/merge'));
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-done', expect.stringContaining('resolve-rebase'));
 
       // Complete the merge session — advances to 'done' and cleans up worktree
       fireEvent('event', { sessionId: 'sess-merge-done', event: { type: 'result' } });
@@ -1050,43 +1065,6 @@ describe('Rate Limit Integration', () => {
       // Pipeline cleaned up by finally block
       expect(orch.pipelines.has(taskId)).toBe(false);
       expect(orch.activeTasks.has(taskId)).toBe(false);
-    });
-
-    it('merge resume sends correct /merge command with branch name', async () => {
-      mkdirSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true });
-
-      // Mock _execGit: throw on 'merge' so runMergePhase spawns a merger agent;
-      // all other git commands (rebase, removeWorktree, etc.) succeed as no-ops.
-      vi.spyOn(orch, '_execGit').mockImplementation((...callArgs: unknown[]) => {
-        const gitArgs = callArgs[0] as string[];
-        if (gitArgs[0] === 'merge') throw new Error('simulated merge conflict');
-      });
-
-      const pipeline = makePipeline({ phase: 'merge', branch: 'feat/my-feature-branch' });
-      orch.pipelines.set(taskId, pipeline);
-      orch.activeTasks.add(taskId);
-      orch.taskStore.update(taskId, { phase: 'merge' });
-      // Set branch on task so removeWorktree cleanup works
-      orch.taskStore.update(taskId, { branch: 'feat/my-feature-branch' });
-
-      mockCreateSession.mockResolvedValue('sess-merge-branch');
-
-      orch.handleRateLimit(pipeline, 0);
-
-      await new Promise(r => setTimeout(r, 50));
-
-      // The merger should receive the branch name in the command
-      expect(mockSendMessage).toHaveBeenCalledWith(
-        'sess-merge-branch',
-        renderCommand('merge', 'feat/my-feature-branch'),
-      );
-
-      // Complete the session cleanly
-      fireEvent('event', { sessionId: 'sess-merge-branch', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
-
-      // Clean up worktree (already cleaned from maps by finally block after merge→done)
-      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch { /* best-effort */ }
     });
   });
 });

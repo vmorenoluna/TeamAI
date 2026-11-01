@@ -80,7 +80,7 @@ vi.mock('../../src/lib/container-manager', () => ({
   getCachedDockerAvailable: vi.fn(() => true),
 }));
 
-import { runSpecPhase, runPlanPhase, runMergePhase, rebaseOntoLatestDefault } from '../../src/lib/orchestrator/phase-runners';
+import { runSpecPhase, runPlanPhase, rebaseOntoLatestDefault } from '../../src/lib/orchestrator/phase-runners';
 import { runQaReview } from '../../src/lib/orchestrator/qa-review';
 import {
   runSubtaskSession, selectSubtasks, tryCherryPickWithRecovery, buildSyntheticReworkDescription,
@@ -649,24 +649,6 @@ describe('implement routing', () => {
 // ── Merge sessions ─────────────────────────────────────────────────────────
 
 describe('merge routing', () => {
-  it('conflicting final merge → merge mode for the feature branch, merger at the project root', async () => {
-    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
-      if (args[0] === 'rev-list') return '0\n';
-      throw new Error('git unavailable');
-    });
-    const execGit = vi.fn((args: string[]) => {
-      if (args[0] === 'merge' && args[1] !== '--abort') throw new Error('CONFLICT');
-    });
-
-    await run(() => runMergePhase(basePipeline(ctx, 'merge') as never, cascadeDeps(ctx, { execGit }) as never));
-
-    expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    const s = sent();
-    expect(promptMode(s.message)).toBe('merge');
-    expect(s.role).toBe('merger');
-    expect(s.cwd).toBe(ctx.root);
-    expect(s.request).toContain('feat/build-the-thing');
-  });
 
   it('rebase onto the base branch with conflicts → resolve-rebase mode for origin/<base> in the worktree', async () => {
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {

@@ -2878,7 +2878,7 @@ describe('Orchestrator', () => {
       // execGit was called for merge
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['merge', `feat/${slug}`]),
+        expect.arrayContaining(['merge', '--ff-only', `feat/${slug}`]),
         expect.any(Object),
       );
       // Worktree removed
@@ -2917,7 +2917,7 @@ describe('Orchestrator', () => {
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git' && Array.isArray(args)) {
           const argStr = args.join(' ');
-          if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+          if (argStr.includes('rebase') && !argStr.includes('--abort') && !argStr.includes('--continue')) {
             throw new Error('Rebase conflict');
           }
           // Confirms a genuine conflict — required for the merger-spawn path.
@@ -2944,7 +2944,7 @@ describe('Orchestrator', () => {
       // Direct merge was attempted
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['merge', `feat/${slug}`]),
+        expect.arrayContaining(['merge', '--ff-only', `feat/${slug}`]),
         expect.any(Object),
       );
       expect(pipeline.phase).toBe('done');
@@ -2976,7 +2976,7 @@ describe('Orchestrator', () => {
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git' && Array.isArray(args)) {
           const argStr = args.join(' ');
-          if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+          if (argStr.includes('rebase') && !argStr.includes('--abort') && !argStr.includes('--continue')) {
             throw new Error('Rebase conflict');
           }
           // Confirms a genuine conflict — required for the merger-spawn path.
@@ -3005,7 +3005,7 @@ describe('Orchestrator', () => {
       }
     });
 
-    it('spawns merger agent when direct merge has conflicts', async () => {
+    it('never creates a merge commit or spawns a merger when the base cannot be fast-forwarded', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       const slug = testData.slug;
@@ -3020,33 +3020,25 @@ describe('Orchestrator', () => {
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
 
-      // One session: merger for the merge conflict (rebase succeeds cleanly)
-      mockCreateSession.mockResolvedValue('sess-merge-conflict');
-
-      // Rebase succeeds, but merge fails with conflict
+      // Rebase succeeds, but the base is never a fast-forward of the branch
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && Array.isArray(args)) {
-          const argStr = args.join(' ');
-          if (argStr.includes('merge') && !argStr.includes('--abort') && argStr.includes(`feat/${slug}`)) {
-            throw new Error('Merge conflict');
-          }
+        if (cmd === 'git' && Array.isArray(args) && args[0] === 'merge' && args.includes(`feat/${slug}`)) {
+          throw new Error('fatal: Not possible to fast-forward, aborting.');
         }
         return '';
       });
 
-      const promise = (orch as AnyOrch).runMerge(pipeline);
-      await waitForSent('sess-merge-conflict');
+      await expect((orch as AnyOrch).runMerge(pipeline)).rejects.toThrow();
 
-      // Merger session created for merge conflict
-      expect(mockCreateSession).toHaveBeenCalledTimes(1);
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-conflict', expect.stringContaining('/merge'));
-
-      // Complete the merger session
-      fireEvent('event', { sessionId: 'sess-merge-conflict', event: { type: 'result' } });
-      await promise;
-
-      expect(mockKillSession).toHaveBeenCalledWith('sess-merge-conflict');
-      expect(pipeline.phase).toBe('done');
+      // No merger session: the merge phase has nothing for an agent to do
+      expect(mockCreateSession).not.toHaveBeenCalled();
+      // Only fast-forward merges were ever attempted
+      const mergeCalls = (mockExecFileSync.mock.calls as unknown[][])
+        .map(c => c[1] as string[])
+        .filter(a => Array.isArray(a) && a[0] === 'merge' && a[1] !== '--abort');
+      expect(mergeCalls.length).toBeGreaterThan(0);
+      for (const a of mergeCalls) expect(a).toContain('--ff-only');
+      expect(pipeline.phase).not.toBe('done');
 
       if (existsSync(pipeline.worktreePath)) {
         rmSync(pipeline.worktreePath, { recursive: true, force: true });
@@ -3078,7 +3070,7 @@ describe('Orchestrator', () => {
       // Direct merge was attempted
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['merge', `feat/${slug}`]),
+        expect.arrayContaining(['merge', '--ff-only', `feat/${slug}`]),
         expect.any(Object),
       );
       expect(pipeline.phase).toBe('done');
@@ -3348,7 +3340,7 @@ describe('Orchestrator', () => {
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git') {
           const argStr = Array.isArray(args) ? args.join(' ') : '';
-          if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+          if (argStr.includes('rebase') && !argStr.includes('--abort') && !argStr.includes('--continue')) {
             rebaseCalled = true;
             throw new Error('Rebase conflict');
           }
@@ -3359,7 +3351,7 @@ describe('Orchestrator', () => {
             return 'refs/remotes/origin/main';
           }
           // Confirms a genuine conflict — required for the merger-spawn path.
-          if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return 'src/conflicted-file.ts\n';
+          if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return mockSendMessage.mock.calls.length > 0 ? '' : 'src/conflicted-file.ts\n';
         }
         // After rebase resolved, gh creates PR directly
         if (cmd === 'gh') {
@@ -3414,7 +3406,7 @@ describe('Orchestrator', () => {
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git') {
           const argStr = Array.isArray(args) ? args.join(' ') : '';
-          if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+          if (argStr.includes('rebase') && !argStr.includes('--abort') && !argStr.includes('--continue')) {
             throw new Error('Rebase conflict');
           }
           if (argStr.includes('remote') && argStr.includes('get-url')) {
@@ -4834,11 +4826,11 @@ describe('Orchestrator', () => {
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'git' && Array.isArray(args)) {
       const argStr = args.join(' ');
-      if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+      if (argStr.includes('rebase') && !argStr.includes('--abort') && !argStr.includes('--continue')) {
       throw new Error('Rebase conflict');
       }
       // Confirms a genuine conflict — required for the merger-spawn path.
-      if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return 'src/conflicted-file.ts\n';
+      if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return mockSendMessage.mock.calls.length > 0 ? '' : 'src/conflicted-file.ts\n';
       }
       return '';
     });
@@ -4898,7 +4890,7 @@ describe('Orchestrator', () => {
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'git' && Array.isArray(args)) {
       const argStr = args.join(' ');
-      if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+      if (argStr.includes('rebase') && !argStr.includes('--abort') && !argStr.includes('--continue')) {
       throw new Error('Rebase conflict');
       }
       // Confirms a genuine conflict — required for the merger-spawn path.

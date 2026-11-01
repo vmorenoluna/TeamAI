@@ -26,7 +26,6 @@ export type AgentMode =
   | 'implement'
   | 'implement-fix'
   | 'qa-review'
-  | 'merge'
   | 'resolve-cherry-pick'
   | 'resolve-rebase';
 
@@ -41,7 +40,6 @@ const MODE_COMMAND: Record<AgentMode, string | null> = {
   'implement': 'implement',
   'implement-fix': 'implement-fix',
   'qa-review': 'qa-review',
-  'merge': 'merge',
   'resolve-cherry-pick': 'resolve-cherry-pick',
   'resolve-rebase': 'resolve-rebase',
 };

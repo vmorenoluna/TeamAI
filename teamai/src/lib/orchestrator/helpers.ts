@@ -53,8 +53,8 @@ export interface PipelineConfig {
   /** Minutes a single tool call can run with no output before the
    *  stall-detector kills the session. Default 30. */
   toolStallMinutes: number;
-  /** Merge strategy auto mode uses when auto-merging a green PR/MR (default 'merge'). */
-  autoMergeMethod?: 'merge' | 'squash' | 'rebase';
+  /** Merge strategy auto mode uses when auto-merging a green PR/MR (default 'squash'). Merge commits are never created: a legacy 'merge' value falls back to the default. */
+  autoMergeMethod?: 'squash' | 'rebase';
   /** When true, all pipeline processing is skipped — demo data stays pristine. */
   demo?: boolean;
   /** When true (default), completed tasks get a trailer-bearing commit message
@@ -311,7 +311,7 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
         maxStallRecoveries: typeof raw.maxStallRecoveries === 'number' ? raw.maxStallRecoveries : 3,
         idleStallMinutes: typeof raw.idleStallMinutes === 'number' ? raw.idleStallMinutes : 15,
         toolStallMinutes: typeof raw.toolStallMinutes === 'number' ? raw.toolStallMinutes : 30,
-        autoMergeMethod: raw.autoMergeMethod === 'squash' || raw.autoMergeMethod === 'rebase' ? raw.autoMergeMethod : 'merge',
+        autoMergeMethod: raw.autoMergeMethod === 'rebase' ? 'rebase' : 'squash',
         recordHistoryInGit: typeof raw.recordHistoryInGit === 'boolean' ? raw.recordHistoryInGit : true,
         includePhasesTrailer: typeof raw.includePhasesTrailer === 'boolean' ? raw.includePhasesTrailer : true,
         demo: typeof raw.demo === 'boolean' ? raw.demo : undefined,
@@ -324,7 +324,7 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
       };
     } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
   }
-  return { maxQaAttempts: 3, maxQaRounds: 9, maxScopeStall: 2, maxScopeReplans: 6, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true, wakeupScanRetryDelayMs: defaultWakeupScanRetryDelayMs, backlogCheck: defaultBacklogCheck, backlogCheckEvidencePaths: [] };
+  return { maxQaAttempts: 3, maxQaRounds: 9, maxScopeStall: 2, maxScopeReplans: 6, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'squash', recordHistoryInGit: true, includePhasesTrailer: true, wakeupScanRetryDelayMs: defaultWakeupScanRetryDelayMs, backlogCheck: defaultBacklogCheck, backlogCheckEvidencePaths: [] };
 }
 
 // ── Session map ───────────────────────────────────────────────────────────

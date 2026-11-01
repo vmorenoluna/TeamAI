@@ -161,11 +161,6 @@ const CONTRACT: Partial<Record<AgentMode, Rule[]>> = {
     r('run verification from the worktree', 'Run from the worktree'),
     r('stable acceptance-criterion id on every criteria entry', '"id": "AC'),
   ],
-  'merge': [
-    r('adopt the injected role persona', 'Adopt the role persona'),
-    r('never push from the agent', 'Do NOT push'),
-    r('stage the merge for review before committing', '--no-commit'),
-  ],
   'spec-summary': [
     r('adopt the injected role persona', 'Adopt the role persona'),
     r('summary length and focus', 'Roughly 3–8 lines of plain prose'),
@@ -184,11 +179,10 @@ const CONTRACT: Partial<Record<AgentMode, Rule[]>> = {
   'resolve-rebase': [
     r('adopt the injected role persona', 'Adopt the role persona'),
     r('never push from the agent', 'Do NOT push'),
-    r('resolve inside the rebase, never by merging', 'run `git merge`'),
-    r('tests run before the rebase is continued', 'Do NOT run `git rebase --continue` yet'),
-    r('remaining test failures are reported, never hidden', 'state clearly in your summary which tests fail'),
-    r('non-interactive continue', 'GIT_EDITOR=true git -c core.hooksPath=/dev/null rebase --continue'),
-    r('a failing project hook never leaves the rebase unfinished', 'Do NOT leave the rebase unfinished'),
+    r('only resolve the conflicts; the orchestrator drives the rebase', 'Your only job is to resolve the conflicts'),
+    r('never continue/skip/abort the rebase or merge', 'Do NOT run `git rebase --continue`'),
+    r('a merge commit would break the linear history', 'a merge commit would break the linear branch history'),
+    r('unresolved files are left for another round', 'the orchestrator then asks again'),
   ],
 };
 

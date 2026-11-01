@@ -358,8 +358,8 @@ describe('ProjectStore', () => {
 
     store.syncDefaults(projectDir);
 
-    // Missing commands should be copied (merge.md was not manually placed)
-    expect(existsSync(join(projectDir, '.claude', 'commands', 'merge.md'))).toBe(true);
+    // Missing commands should be copied (resolve-cherry-pick.md was not manually placed)
+    expect(existsSync(join(projectDir, '.claude', 'commands', 'resolve-cherry-pick.md'))).toBe(true);
 
     // The already-existing implement.md should NOT be overwritten (no baseline — preserved)
     const implContent = readFileSync(join(projectDir, '.claude', 'commands', 'implement.md'), 'utf-8');
@@ -395,7 +395,7 @@ describe('ProjectStore', () => {
   it('syncDefaults handles a deleted project command file by restoring from defaults', () => {
     store.add(projectDir, 'Test Project');
 
-    const cmdPath = join(projectDir, '.claude', 'commands', 'merge.md');
+    const cmdPath = join(projectDir, '.claude', 'commands', 'resolve-cherry-pick.md');
     expect(existsSync(cmdPath)).toBe(true);
 
     // Delete the command file from the project
@@ -404,14 +404,14 @@ describe('ProjectStore', () => {
 
     // Modify the default source to trigger a checksum mismatch — the deleted-file
     // check only runs when storedChecksum !== currentChecksum.
-    const defaultCmdSrc = join(process.cwd(), 'defaults', 'commands', 'merge.md');
+    const defaultCmdSrc = join(process.cwd(), 'defaults', 'commands', 'resolve-cherry-pick.md');
     const defaultCmdBackup = readFileSync(defaultCmdSrc, 'utf-8');
     writeFileSync(defaultCmdSrc, defaultCmdBackup + '\n\n<!-- restore-deleted test -->\n');
 
     try {
       // syncDefaults should detect the changed default, find the missing file, and restore it
       const updated = store.syncDefaults(projectDir);
-      expect(updated).toContain('commands/merge.md');
+      expect(updated).toContain('commands/resolve-cherry-pick.md');
 
       // The file should be restored with the NEW default content
       expect(existsSync(cmdPath)).toBe(true);
@@ -425,7 +425,7 @@ describe('ProjectStore', () => {
   it('syncDefaults dryRun reports a deleted command file without restoring it', () => {
     store.add(projectDir, 'Test Project');
 
-    const cmdPath = join(projectDir, '.claude', 'commands', 'merge.md');
+    const cmdPath = join(projectDir, '.claude', 'commands', 'resolve-cherry-pick.md');
     expect(existsSync(cmdPath)).toBe(true);
 
     // Delete the command file
@@ -433,14 +433,14 @@ describe('ProjectStore', () => {
     expect(existsSync(cmdPath)).toBe(false);
 
     // Modify the default source to trigger a checksum mismatch
-    const defaultCmdSrc = join(process.cwd(), 'defaults', 'commands', 'merge.md');
+    const defaultCmdSrc = join(process.cwd(), 'defaults', 'commands', 'resolve-cherry-pick.md');
     const defaultCmdBackup = readFileSync(defaultCmdSrc, 'utf-8');
     writeFileSync(defaultCmdSrc, defaultCmdBackup + '\n\n<!-- dryRun-deleted test -->\n');
 
     try {
       // dryRun should report it but not restore
       const updated = store.syncDefaults(projectDir, true);
-      expect(updated).toContain('commands/merge.md');
+      expect(updated).toContain('commands/resolve-cherry-pick.md');
       expect(existsSync(cmdPath)).toBe(false);
     } finally {
       retryOnLock(() => writeFileSync(defaultCmdSrc, defaultCmdBackup));
@@ -460,7 +460,7 @@ describe('ProjectStore', () => {
     writeFileSync(manifestPath, '{ not valid json }');
 
     // Delete one command file so the sync has real work to do.
-    const cmdPath = join(projectDir, '.claude', 'commands', 'merge.md');
+    const cmdPath = join(projectDir, '.claude', 'commands', 'resolve-cherry-pick.md');
     unlinkSync(cmdPath);
     expect(existsSync(cmdPath)).toBe(false);
 
@@ -468,7 +468,7 @@ describe('ProjectStore', () => {
     const updated = store.syncDefaults(projectDir);
 
     // Missing command files should be copied (reported in updated)
-    expect(updated).toContain('commands/merge.md');
+    expect(updated).toContain('commands/resolve-cherry-pick.md');
     expect(existsSync(cmdPath)).toBe(true);
 
     // Existing files should NOT be in updated and NOT be overwritten

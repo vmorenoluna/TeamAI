@@ -665,7 +665,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     expect(pipeline.phase).toBe('failed');
 
     const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-    expect(logContent).toContain('Merger could not resolve divergence');
+    expect(logContent).toContain('Merger could not resolve rebase conflicts');
   });
 
   // ── Post-merger push failure ──

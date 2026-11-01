@@ -51,7 +51,7 @@ vi.mock('../../src/lib/command-templates', () => ({
   renderCommand: vi.fn(() => { throw new Error('Command include "_shared/x.md" not found'); }),
 }));
 
-import { runSpecPhase, runPlanPhase, runMergePhase } from '../../src/lib/orchestrator/phase-runners';
+import { runSpecPhase, runPlanPhase } from '../../src/lib/orchestrator/phase-runners';
 import { runQaReview } from '../../src/lib/orchestrator/qa-review';
 import { runSubtaskSession } from '../../src/lib/orchestrator/implement';
 
@@ -108,7 +108,6 @@ describe('a command that cannot be rendered never spawns a session', () => {
       root, join(specPath, 'output.log'), false, false, join(specPath, 'human_feedback.md'),
       [], new Set(), { current: Promise.resolve() },
     )],
-    ['merge', () => runMergePhase(pipeline('merge') as never, deps() as never)],
   ];
 
   for (const [name, runPhase] of cases) {

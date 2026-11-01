@@ -1042,7 +1042,7 @@ describe('Auto Mode Integration', () => {
       await vi.advanceTimersByTimeAsync(31_000);
 
       expect(mockExecFileSync).toHaveBeenCalledWith(
-        'gh', ['pr', 'merge', '42', '--merge'],
+        'gh', ['pr', 'merge', '42', '--squash', '--subject', expect.any(String), '--body-file', expect.stringContaining('.teamai')],
         expect.objectContaining({ cwd: testDir }),
       );
     });
@@ -1590,7 +1590,7 @@ describe('Auto Mode Integration', () => {
 
       expect(viewCallCount).toBe(2);
       expect(mockExecFileSync).toHaveBeenCalledWith(
-        'gh', ['pr', 'merge', '42', '--merge'],
+        'gh', ['pr', 'merge', '42', '--squash', '--subject', expect.any(String), '--body-file', expect.stringContaining('.teamai')],
         expect.any(Object),
       );
     });
