@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -17,6 +17,14 @@ vi.mock('../../src/lib/command-templates', () => ({
 }));
 const runSensors = vi.fn();
 vi.mock('../../src/lib/sensors', () => ({ runSensors: (...a: unknown[]) => runSensors(...a) }));
+// Container mode is controlled per test; the default is "no Docker".
+const containerState = { enabled: false };
+vi.mock('../../src/lib/container-manager', () => ({
+  readContainerConfig: () => ({ enabled: containerState.enabled, explicit: true }),
+  readContainerRemoteUser: () => 'vscode',
+  hostToContainerPath: (p: string, root: string, ws: string) => `${ws}/${p.replace(root, '').replace(/\\/g, '/').replace(/^\//, '')}`,
+  containerManager: { getRunningContainer: vi.fn(async () => ({ containerId: 'cid1', remoteWorkspaceFolder: '/workspaces/proj' })) },
+}));
 
 import { rebaseResolvingConflicts } from '../../src/lib/orchestrator/phase-runners';
 import { driveReplay, replayConfig, CHECKS_WAIVER_FILE } from '../../src/lib/orchestrator/replay-driver';
@@ -39,16 +47,12 @@ function scriptedGit(stops: number[], opts: { kind?: Kind; started?: boolean; em
   let inProgress = opts.started ?? false;
   let emptyAt = opts.emptyCommitAt;
   const calls: string[][] = [];
-  if (inProgress) mkdirSync(join(dir, 'rebase-merge'), { recursive: true });
   const hasConflict = () => inProgress && sessionsOnStop < (stops[stop] ?? 0);
 
   const advance = () => {
     stop++;
     sessionsOnStop = 0;
-    if (stop >= stops.length) {
-      inProgress = false;
-      rmSync(join(dir, 'rebase-merge'), { recursive: true, force: true });
-    }
+    if (stop >= stops.length) inProgress = false;
   };
   onSession = () => { sessionsOnStop++; };
 
@@ -67,13 +71,16 @@ function scriptedGit(stops: number[], opts: { kind?: Kind; started?: boolean; em
       // initial start
       if (stops.length === 1 && (stops[0] ?? 0) === 0) return; // clean
       inProgress = true;
-      mkdirSync(join(dir, 'rebase-merge'), { recursive: true });
       throw new Error('CONFLICT');
     }
   });
   const execGitCapture = vi.fn(async (args: string[]) => {
-    if (args[0] === 'rev-parse' && args.includes('CHERRY_PICK_HEAD')) return inProgress ? 'deadbeef\n' : '';
-    if (args[0] === 'rev-parse') return join(dir, args[2]);
+    // "In progress" is asked of git (REBASE_HEAD / CHERRY_PICK_HEAD), never of the host filesystem: `dir` holds
+    // no .git at all, and in container mode git reports container paths that do not exist on the host.
+    if (args[0] === 'rev-parse' && (args.includes('CHERRY_PICK_HEAD') || args.includes('REBASE_HEAD'))) {
+      if (!inProgress) throw new Error('fatal: Needed a single revision');
+      return '0123456789abcdef0123456789abcdef01234567\n';
+    }
     if (args[0] === 'diff') return hasConflict() ? 'src/a.ts\n' : '';
     return '';
   });
@@ -95,6 +102,7 @@ function scriptedGit(stops: number[], opts: { kind?: Kind; started?: boolean; em
 beforeEach(() => {
   sent.length = 0;
   onSession = () => {};
+  containerState.enabled = false;
   runSensors.mockReset();
   replayConfig.sessionFailureBackoffMs = 0;
   replayConfig.maxConsecutiveSessionFailures = 5;
@@ -193,6 +201,31 @@ describe('driveReplay', () => {
       expect(sent).toHaveLength(1);
       expect(existsSync(join(g.logDir, CHECKS_WAIVER_FILE))).toBe(false);
       expect(readFileSync(join(g.logDir, 'output.log'), 'utf-8')).toContain('fails on base too');
+    });
+
+    it('runs the checks on the host without Docker', async () => {
+      const g = scriptedGit([1], { started: true });
+      runSensors.mockResolvedValue(passing);
+      await g.drive({ sensors: [{ command: 'npm test' }] });
+      expect(runSensors.mock.calls[0][2].container).toBeUndefined();
+    });
+
+    it('runs the checks inside the container in container mode, with the worktree mapped to its container path', async () => {
+      containerState.enabled = true;
+      const g = scriptedGit([1], { started: true });
+      runSensors.mockResolvedValue(passing);
+      await g.drive({ sensors: [{ command: 'npm test' }], projectRoot: '/host/proj', worktreePath: '/host/proj/.worktrees/wt' });
+      const c = runSensors.mock.calls[0][2].container;
+      expect(c).toMatchObject({ containerId: 'cid1', user: 'vscode', cwd: '/workspaces/proj/.worktrees/wt' });
+      expect(c.mapPath('/host/proj/.teamai/t/sensors/x.json')).toBe('/workspaces/proj/.teamai/t/sensors/x.json');
+    });
+
+    it('continues with hooks and the editor disabled through a path that exists on no platform', async () => {
+      const g = scriptedGit([1], { started: true });
+      await g.drive();
+      const cont = g.calls.find(a => a.includes('--continue'))!;
+      expect(cont).toContain('core.hooksPath=.teamai-no-hooks');
+      expect(cont.join(' ')).not.toContain('/dev/null');
     });
 
     it('does not run the checks for a stop that had no conflicts', async () => {

@@ -26,6 +26,7 @@ import path from 'path';
 import { processManager } from '../process-manager';
 import { renderCommand } from '../command-templates';
 import { runSensors, type SensorConfig } from '../sensors';
+import { readContainerConfig, readContainerRemoteUser, containerManager, hostToContainerPath } from '../container-manager';
 import { updateSessionMap, logToOutput, computePipelineConfig } from './helpers';
 import { RateLimitError } from './rate-limit';
 import { SessionKilledError, WorktreeError } from './errors';
@@ -79,9 +80,31 @@ const NO_VERIFICATION_NOTE =
   '\n\nNo verification command is configured for the orchestrator to run for you: before you finish, ' +
   'run the project\'s test suite ONCE and fix failures your resolution caused.';
 
-/** `git -c … <kind> --continue` with hooks and the editor disabled. */
+/**
+ * `git -c … <kind> --continue` with hooks and the editor disabled. The hooks path is a directory that does
+ * not exist (relative to the worktree), which disables hooks identically on Windows, macOS and Linux and
+ * inside a container — `/dev/null` is not a valid path for a Windows git.
+ */
 const continueArgs = (kind: ReplayKind) =>
-  ['-c', 'core.editor=true', '-c', 'core.hooksPath=/dev/null', kind, '--continue'];
+  ['-c', 'core.editor=true', '-c', 'core.hooksPath=.teamai-no-hooks', kind, '--continue'];
+
+/**
+ * Where the project's checks run: inside the container when container mode is on and the container is up
+ * (the toolchain the agents use lives there), on the host otherwise.
+ */
+async function checkContainer(o: ReplayOptions) {
+  try {
+    if (!readContainerConfig(o.projectRoot).enabled) return undefined;
+    const info = await containerManager.getRunningContainer(o.projectRoot);
+    if (!info) return undefined;
+    return {
+      containerId: info.containerId,
+      user: readContainerRemoteUser(o.projectRoot),
+      cwd: hostToContainerPath(o.worktreePath, o.projectRoot, info.remoteWorkspaceFolder),
+      mapPath: (p: string) => hostToContainerPath(p, o.projectRoot, info.remoteWorkspaceFolder),
+    };
+  } catch { return undefined; }
+}
 
 async function unmergedFiles(deps: ReplayDeps, wt: string): Promise<string> {
   return (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], wt)).trim();
@@ -91,19 +114,15 @@ async function unmergedFiles(deps: ReplayDeps, wt: string): Promise<string> {
 export async function replayInProgress(
   deps: Pick<ReplayDeps, 'execGitCapture'>, kind: ReplayKind, wt: string,
 ): Promise<boolean> {
-  if (kind === 'cherry-pick') {
-    try {
-      // Require non-empty output: a real `git rev-parse --verify` either throws or prints a SHA.
-      return (await deps.execGitCapture(['rev-parse', '--verify', 'CHERRY_PICK_HEAD'], wt)).trim().length > 0;
-    } catch { return false; }
-  }
-  for (const dir of ['rebase-merge', 'rebase-apply']) {
-    try {
-      const p = (await deps.execGitCapture(['rev-parse', '--git-path', dir], wt)).trim();
-      if (p && existsSync(path.resolve(wt, p))) return true;
-    } catch { /* treat as not in progress */ }
-  }
-  return false;
+  // Ask git itself, never the filesystem: in container mode git runs inside the container and reports
+  // container paths (/workspaces/...) that do not exist on the host, so probing the git dir from here
+  // wrongly reports "nothing in progress" and leaves a stopped rebase half-done.
+  // CHERRY_PICK_HEAD / REBASE_HEAD exist exactly while the operation is stopped. A real
+  // `git rev-parse --verify` either fails or prints a full object id, so anything else is "not in progress".
+  const ref = kind === 'cherry-pick' ? 'CHERRY_PICK_HEAD' : 'REBASE_HEAD';
+  try {
+    return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test((await deps.execGitCapture(['rev-parse', '--verify', '-q', ref], wt)).trim());
+  } catch { return false; }
 }
 
 export async function abortReplay(
@@ -129,6 +148,7 @@ async function verify(o: ReplayOptions, sensors: SensorConfig[]): Promise<string
   if (sensors.length === 0) return null;
   const result = await runSensors(sensors, 'post_integration', {
     cwd: o.worktreePath, specPath: o.logDir, files: [], logFile: path.join(o.logDir, 'output.log'),
+    container: await checkContainer(o),
   });
   if (result.allPassed) return null;
 
