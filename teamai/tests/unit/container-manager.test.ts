@@ -70,7 +70,7 @@ describe('checkDockerAvailable', () => {
     _resetDockerAvailableCache();
     mockDockerExec.mockReturnValueOnce('');
     expect(await checkDockerAvailable()).toBe(true);
-    expect(mockDockerExec).toHaveBeenCalledWith('docker', ['info'], expect.any(Object));
+    expect(mockDockerExec).toHaveBeenCalledWith('docker', ['info', '--format', '{{.OSType}}'], expect.any(Object));
   });
 });
 
