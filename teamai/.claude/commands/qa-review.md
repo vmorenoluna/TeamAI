@@ -307,7 +307,10 @@ subtask the check file is required only when you have something to say: a new ti
 verdict other than `unrelated` on an existing one. It is also required whenever your session
 produced evidence files matching the patterns named in the header (logs, measurements, probe
 output), because what they show may matter to other tickets even when it doesn't matter to
-yours. If you write the file at all, it must still cover every ticket in the snapshot.
+yours. Decide this by the path patterns alone: a file you create, change or delete under one
+of them (including raw job output you later rename) obliges you to write the check before you
+end the session, however little you think it shows. If you write the file at all, it must still
+cover every ticket in the snapshot.
 
 **Verdicts.** Judge each ticket against what your task does and what it has found:
 

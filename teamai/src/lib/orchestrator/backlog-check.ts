@@ -164,7 +164,9 @@ export function prepareBacklogCheck(opts: {
       `In this implement subtask the check file \`$TEAMAI_SPEC_DIR/${checkFile(unit)}\` is required only if ` +
       `you file or report anything about another ticket` +
       (optionalUnlessEvidence.length
-        ? `, or if this session produces evidence files matching ${optionalUnlessEvidence.map(g => `\`${g}\``).join(', ')}`
+        ? `, or if this session produces evidence files matching ${optionalUnlessEvidence.map(g => `\`${g}\``).join(', ')}` +
+          ` (decide by the path glob alone, not by how useful you think the file is: if you create or change a file under ` +
+          `those paths, write the check before you end the session, because the orchestrator will otherwise resume you just to write it)`
         : '') +
       `. When you write it, it must cover every ticket in the snapshot, as described under **Backlog check**.\n`;
   } else {
@@ -308,11 +310,23 @@ export interface AppliedEffects {
   outcomes: Array<{ id: string; verdict: Verdict; result: 'applied' | 'note-only' | 'skipped'; detail?: string }>;
 }
 
-function appendNote(store: TaskStore, id: string, note: string): void {
+/**
+ * Add a dated note to a ticket. A source task judges the board in every
+ * session (spec, plan, each subtask, QA) and often reaches the same verdict
+ * with a reworded reason, so an earlier note from the same source and kind
+ * (`noteKey`) is replaced instead of piled up: every later session that reads
+ * the ticket pays for each note in tokens.
+ */
+function appendNote(store: TaskStore, id: string, note: string, noteKey?: string): void {
   const t = store.getById(id);
   if (!t || t.description.includes(note)) return;
   const stamp = new Date().toISOString().slice(0, 10);
-  store.update(id, { description: `${t.description}\n\n[${stamp}] ${note}` });
+  let description = t.description;
+  if (noteKey) {
+    const kept = description.split('\n\n').filter(p => !(/^\[\d{4}-\d{2}-\d{2}\] /.test(p) && p.slice(13).startsWith(noteKey)));
+    description = kept.join('\n\n');
+  }
+  store.update(id, { description: `${description}\n\n[${stamp}] ${note}` });
 }
 
 function prepareRespec(store: TaskStore, target: Task, note: string): boolean {
@@ -346,7 +360,7 @@ export function applyCheck(store: TaskStore, check: CheckFile, source: Task, rep
       ? ' Re-derive this ticket\'s premise and evidence against that task\'s result before speccing; reject the ticket if the premise no longer holds.'
       : '';
     const note = `${label} "${source.title}" (${source.id}): ${e.reason}.${action}`;
-    appendNote(store, target.id, note);
+    appendNote(store, target.id, note, `${label} "${source.title}" (${source.id}): `);
 
     if (e.verdict === 'update') { effects.outcomes.push({ id: e.id, verdict: e.verdict, result: 'applied' }); continue; }
     if (!IDLE_PHASES.has(target.phase)) {

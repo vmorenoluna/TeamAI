@@ -115,6 +115,25 @@ describe('commitBacklogCheck', () => {
     expect(created.description).toContain('Unverified');
   });
 
+  it('keeps one note per source task and kind instead of piling up reworded ones', () => {
+    const env = setup();
+    env.store.updatePhase(A, 'backlog');
+    const run = (unit: string, reason: string) => {
+      prepareBacklogCheck({ specPath: env.specPath, unit, store: env.store, ownTaskId: SRC, requireSelf: false });
+      writeCheck(env.specPath, unit, { tickets: [{ id: A, verdict: 'update', reason }, { id: B, verdict: 'unrelated', reason: '' }] });
+      expect(commit(env, unit).status).toBe('applied');
+    };
+    run('st1', 'first reason');
+    run('st2', 'second reason');
+    run('st3', 'third reason');
+    const description = env.store.getById(A)!.description;
+    expect(description.startsWith('a description')).toBe(true);
+    expect(description).toContain('third reason');
+    expect(description).not.toContain('first reason');
+    expect(description).not.toContain('second reason');
+    expect(description.split('Update from').length - 1).toBe(1);
+  });
+
   it('refuses to apply when a ticket appeared after the snapshot', () => {
     const env = setup();
     prepareBacklogCheck({ specPath: env.specPath, unit: 'spec', store: env.store, ownTaskId: SRC, requireSelf: false });
@@ -250,5 +269,6 @@ describe('evidence trigger (implement subtasks)', () => {
     const h = prepareBacklogCheck({ specPath: env.specPath, unit: 'st3', store: env.store, ownTaskId: SRC, requireSelf: false, optionalUnlessEvidence: ['scripts/sweep_logs/**'] });
     expect(h).toContain('required only if');
     expect(h).toContain('`scripts/sweep_logs/**`');
+    expect(h).toContain('decide by the path glob alone');
   });
 });
