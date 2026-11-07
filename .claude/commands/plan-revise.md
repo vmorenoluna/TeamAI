@@ -188,6 +188,20 @@ Rules:
   (c) the specific check to apply to the output (e.g. "section X shows fewer than N
   failures"). This makes the criterion independently verifiable by QA without relying
   on the engineer's self-report.
+- **Don't spend one subtask per repetition of the same long job.** Every wakeup subtask
+  costs a launch session, one or more re-entry sessions, and the orchestrator's follow-up
+  checks. When the spec asks for several runs of the same command that differ only in
+  parameters (more seeds, another grid, another configuration) and the project's resource
+  limits allow them to run side by side, plan ONE subtask that launches them all, waits once
+  and commits all outputs, with `files_to_create` listing every final artifact. Split them
+  only when a later run depends on an earlier run's output or the limits forbid overlap, and
+  then state that reason in the later subtask's description.
+- **List a job's transient output in `files` as well as its final artifacts.** When a job
+  writes in-progress files that the subtask renames or deletes at the end (timestamped
+  logs, partial results), the commit guard may already have committed them in an earlier
+  session. Their later deletion is then an edit to a file outside the subtask's `files` and
+  is held for scope arbitration. Put the transient paths or their glob in `files` when
+  you can name them.
 - **Run-only gate subtasks set `"verify_only": true`.** A subtask whose job is to
   run something and report (the full test suite, a build, a benchmark) and which edits
   nothing when everything passes MUST carry `"verify_only": true`. List in `files`
@@ -292,7 +306,10 @@ subtask the check file is required only when you have something to say: a new ti
 verdict other than `unrelated` on an existing one. It is also required whenever your session
 produced evidence files matching the patterns named in the header (logs, measurements, probe
 output), because what they show may matter to other tickets even when it doesn't matter to
-yours. If you write the file at all, it must still cover every ticket in the snapshot.
+yours. Decide this by the path patterns alone: a file you create, change or delete under one
+of them (including raw job output you later rename) obliges you to write the check before you
+end the session, however little you think it shows. If you write the file at all, it must still
+cover every ticket in the snapshot.
 
 **Verdicts.** Judge each ticket against what your task does and what it has found:
 
