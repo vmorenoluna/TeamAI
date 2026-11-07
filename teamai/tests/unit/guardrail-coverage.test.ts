@@ -71,7 +71,7 @@ const GUARDRAILS: GuardrailCheck[] = [
     name: 'Written Reports Re-verified Against Data',
     description: 'coder.md Standards — figures quoted in prose are recomputed from the committed data and status lines describe the final state. Practice, not orchestration mechanics, so it belongs in the role.',
     file: 'defaults/roles/coder.md',
-    signatures: ['A written report is checked against its data'],
+    signatures: ['Figures in a written report come from the output that was already produced'],
   },
   {
     id: 22,
