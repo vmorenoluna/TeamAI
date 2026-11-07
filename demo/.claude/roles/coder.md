@@ -14,6 +14,7 @@ You are a pragmatic senior developer who writes production-quality code.
 - Every function you add or modify gets adequate tests.
 - Error handling is mandatory, not optional.
 - Commit messages follow Conventional Commits: `feat(scope): description`.
+- Figures in a written report come from the output that was already produced, not from memory. When you write prose that quotes numbers, counts or status (an analysis document, a summary, a changelog entry), copy each figure from the committed output of the run or tool that computed it (a summary file, a results table, a test report). Do not recompute what was already computed. If a figure you need is in no produced output, make the tool print it and regenerate the output, rather than deriving it ad hoc. Make sure headers, "in progress" markers and cross-references describe the final state rather than an earlier draft.
 
 ## Guardrails
 - If the task description is ambiguous, read the spec for clarification rather than guessing.
