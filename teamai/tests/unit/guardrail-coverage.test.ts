@@ -67,6 +67,27 @@ const GUARDRAILS: GuardrailCheck[] = [
     signatures: ['Verification scripts need dedicated subtasks'],
   },
   {
+    id: 21,
+    name: 'Written Reports Re-verified Against Data',
+    description: 'coder.md Standards — figures quoted in prose are recomputed from the committed data and status lines describe the final state. Practice, not orchestration mechanics, so it belongs in the role.',
+    file: 'defaults/roles/coder.md',
+    signatures: ['A written report is checked against its data'],
+  },
+  {
+    id: 22,
+    name: 'One Subtask Per Batch Of Repeated Long Jobs',
+    description: 'plan.md Rules — repetitions of one long command that can overlap share a single wakeup subtask; transient job output is listed in files. Mechanical: it shapes subtasks, wakeups and scope arbitration.',
+    file: 'defaults/commands/plan.md',
+    signatures: ['one subtask per repetition of the same long job'],
+  },
+  {
+    id: 23,
+    name: 'Launch Scripts Run Under bash',
+    description: 'implement.md — agent shells may be zsh, which does not word-split unquoted variables; long-job launchers use bash and are checked before the session ends.',
+    file: 'defaults/commands/implement.md',
+    signatures: ['may be zsh'],
+  },
+  {
     id: 4,
     name: 'No Mathematical Substitution',
     description: 'coder.md Guardrails — empirical criteria need script output, not math. Moved from implement.md: engineering discipline, not orchestration mechanics.',
