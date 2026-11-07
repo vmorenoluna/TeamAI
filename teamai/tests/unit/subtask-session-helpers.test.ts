@@ -226,6 +226,13 @@ describe('consumeSubtaskWakeupFiles', () => {
     expect(pipeline.wakeupUntil).toBe('2030-01-01T00:00:00Z');
   });
 
+  it('keeps counting attempts for the same subtask re-scheduling the same job', async () => {
+    writeFileSync(join(specDir, 'subtask_wakeup-st10.json'), wakeup(10, '2030-01-01T00:00:00Z'));
+    const pipeline = makePipeline({ wakeupAttemptCount: 1, wakeupSubtaskId: 10, wakeupCommand: 'cmd10' });
+    await consumeSubtaskWakeupFiles(pipeline, makeDeps(), makeSubtask({ id: 10 }), cwd, true);
+    expect(pipeline.wakeupAttemptCount).toBe(2);
+  });
+
   it('treats a malformed file as missing and deletes it', async () => {
     const file = join(specDir, 'subtask_wakeup-st5.json');
     writeFileSync(file, '{not json');
@@ -274,6 +281,20 @@ describe('checkSubtaskScope', () => {
     expect(violations.has(3)).toBe(false);
     expect(result.changedFiles).toEqual(['src/a.ts', 'new.ts', 'stray.ts']);
     expect(result.unlistedFiles).toEqual(['stray.ts']);
+  });
+
+  it('does not report deletions of files only a WIP auto-commit added as unlisted', async () => {
+    const wip = 'WIP: auto-commit subtask 8 changes (coder session ended without committing)';
+    execGitCapture.mockImplementation((args: string[]) => {
+      if (args[0] === 'log') return (args[args.length - 1] === 'raw.jsonl' ? wip : 'feat: add real.txt') + '\n';
+      if (args.includes('--diff-filter=D')) return 'raw.jsonl\nreal.txt\n';
+      return 'raw.jsonl\nreal.txt\nfinal.jsonl\n';
+    });
+    const result = await checkSubtaskScope(
+      makePipeline(), makeDeps(), makeSubtask({ id: 8, files: ['final.jsonl'] }),
+      cwd, 'abc123', join(specDir, 'st8.log'), new Set<number>(),
+    );
+    expect(result.unlistedFiles).toEqual(['real.txt']);
   });
 
   it('skips the check for the QA-fallback subtask 9999', async () => {
@@ -674,6 +695,23 @@ describe('scope hold and arbitration (real git)', async () => {
       expect(pipeline.phase).toBe('failed');
       expect(readJson('qa_report.json').criteria[0].criterion).toBe('Scope arbitration budget');
       expect(existsSync(join(specDir, 'scope_report-st1.json'))).toBe(true);
+    });
+
+    it('releases the wakeup budget when a re-entry session ends in a scope hold', async () => {
+      const s1 = st(1, ['a.ts']);
+      writePlan([s1]);
+      let wrote = false;
+      verdictsWriter = () => {
+        if (!wrote) { wrote = true; commit(repo, { 'a.ts': 'a\na2\n', 'x.ts': 'x\n' }); return null; }
+        return { verdicts: [{ subtask_id: 1, path: 'x.ts', verdict: 'approve', reason: 'ok' }] };
+      };
+      const pipeline = pipelineFor({ wakeupSubtaskId: 1, wakeupAttemptCount: 2, wakeupCommand: 'job' });
+
+      await runImplement(pipeline, realDeps());
+
+      expect((pipeline as any).wakeupSubtaskId).toBeUndefined();
+      expect((pipeline as any).wakeupAttemptCount).toBe(0);
+      expect(outputLog()).toContain('clearing wakeup state before scope arbitration');
     });
 
     it('does not arbitrate while a wakeup is pending', async () => {

@@ -82,9 +82,16 @@ export function preRestoreFailedTask(taskStore: TaskStore, taskId: string): void
   // disappears and a subsequent failure isn't mislabeled with a stale reason
   taskStore.update(taskId, { completionSummary: undefined, failureReason: undefined });
 
-  // Clear output.log for a fresh terminal view on retry
+  // Clear output.log for a fresh terminal view on retry, keeping the failed
+  // run's log: it holds the failure's own lines (which cap was hit, which
+  // phase threw) and nothing else records them once the retry starts.
   const outputPath = join(dir, 'output.log');
-  try { if (existsSync(outputPath)) unlinkSync(outputPath); } catch { /* best-effort */ }
+  try {
+    if (existsSync(outputPath)) {
+      try { appendFileSync(join(dir, 'output_before_retry.log'), readFileSync(outputPath)); } catch { /* best-effort — never block the retry */ }
+      unlinkSync(outputPath);
+    }
+  } catch { /* best-effort */ }
 }
 
 /**

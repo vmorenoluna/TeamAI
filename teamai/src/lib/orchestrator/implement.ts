@@ -1424,6 +1424,38 @@ export function failIfSubtaskBlocked(
 }
 
 /**
+ * Drop deletions of files that only ever existed because the commit guard's
+ * WIP auto-commit swept them up. A wakeup subtask's launch session leaves a
+ * job's in-progress output on disk, the guard commits it, and the re-entry
+ * session then renames or removes it: that deletion is the subtask cleaning up
+ * after itself, not an out-of-scope edit, so it must not be held for planner
+ * arbitration (which approved every such case).
+ */
+async function withoutDiscardedWipFiles(
+  deps: ImplementDeps, cwd: string, preSessionHead: string, unlisted: string[],
+): Promise<string[]> {
+  if (unlisted.length === 0) return unlisted;
+  try {
+    const deleted = new Set((await deps.execGitCapture(
+      ['diff', '--name-only', '--diff-filter=D', preSessionHead + '..HEAD'], cwd,
+    )).trim().split('\n').filter(Boolean));
+    const kept: string[] = [];
+    for (const f of unlisted) {
+      if (deleted.has(f)) {
+        const addedBy = (await deps.execGitCapture(
+          ['log', '--diff-filter=A', '--format=%s', '-n', '1', preSessionHead, '--', f], cwd,
+        )).trim();
+        if (addedBy.startsWith('WIP: auto-commit subtask ')) continue;
+      }
+      kept.push(f);
+    }
+    return kept;
+  } catch {
+    return unlisted;
+  }
+}
+
+/**
  * Post-session scope check (hold-and-arbitrate). Computes the files changed
  * since `preSessionHead` (`git diff --name-only`) and the subset not listed in
  * the subtask's `files`/`files_to_create` (`unlistedFiles`). Unlisted files are
@@ -1468,7 +1500,9 @@ export async function checkSubtaskScope(
 
       // Declared files are `files` (edited) plus `files_to_create` (created fresh).
       const assignedFiles = new Set([...(subtask.files || []), ...(subtask.files_to_create || [])]);
-      const unlistedFiles = changedFiles.filter(f => !assignedFiles.has(f));
+      const unlistedFiles = await withoutDiscardedWipFiles(
+        deps, cwd, preSessionHead, changedFiles.filter(f => !assignedFiles.has(f)),
+      );
       if ((subtask.files || []).length > 0 && !(subtask.files_to_create || []).length && changedFiles.length === 0 && !subtask.verify_only) {
         // No-op subtask detection: the coder session ended having committed
         // NO changes at all, for a subtask whose only declared scope is
@@ -2133,6 +2167,13 @@ export async function runSubtaskSession(
   // finishing this session, and the wakeup re-entry diff still contains the
   // unlisted files, so the check runs again when it does.
   if (unlistedFiles.length > 0 && !wakeupDetected) {
+    // A re-entry that ends here has finished waiting on its job; the hold
+    // returns before the completion block below, which would otherwise be
+    // the only place its wakeup state (and attempt budget) is released.
+    if (wasWakeupReentry) {
+      clearWakeupState(pipeline);
+      logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + subtask.id + ' finished waiting — clearing wakeup state before scope arbitration\n');
+    }
     await holdSubtaskForArbitration(pipeline, deps, subtask, cwd, preSessionHead, unlistedFiles);
     return;
   }
