@@ -53,6 +53,34 @@ export interface ContainerInfo {
   remoteWorkspaceFolder: string;
 }
 
+/**
+ * The host's GitHub token, for provisioning steps that run `gh` inside the
+ * container. The host's `gh` usually keeps its login in the OS keyring, which a
+ * container cannot read, so a freshly built container has no GitHub login of
+ * its own. Returns '' when `gh` is missing or not logged in.
+ */
+export async function getHostGithubToken(): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync(getToolPath('gh'), ['auth', 'token'], { timeout: 10_000 });
+    return stdout.trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Environment for `devcontainer up`. A GH_TOKEN the user already exported wins;
+ * otherwise the host `gh` login is forwarded so a project's devcontainer.json can
+ * pass it into its lifecycle commands (e.g. via remoteEnv `${localEnv:GH_TOKEN}`).
+ */
+export async function devcontainerUpEnv(
+  base: Record<string, string | undefined> = process.env,
+): Promise<Record<string, string | undefined>> {
+  if (base.GH_TOKEN || base.GITHUB_TOKEN) return base;
+  const token = await getHostGithubToken();
+  return token ? { ...base, GH_TOKEN: token } : base;
+}
+
 function devcontainerBin(): string {
   const custom = getToolPath('devcontainer');
   if (custom !== 'devcontainer') return custom;
@@ -478,14 +506,15 @@ export class ContainerManager extends EventEmitter {
     }
   }
 
-  private _spawnDevcontainerUp(args: string[], projectRoot: string, logFile?: string): Promise<ContainerInfo> {
+  private async _spawnDevcontainerUp(args: string[], projectRoot: string, logFile?: string): Promise<ContainerInfo> {
+    const env = await devcontainerUpEnv();
     return new Promise((resolve, reject) => {
       // cross-spawn, not child_process.spawn: on Windows the devcontainer CLI
       // is a .cmd shim, which Node (>=18.20/20.12/21.7, CVE-2024-27980) refuses
       // to spawn directly — it throws `spawn EINVAL`. cross-spawn routes .cmd/.bat
       // through cmd.exe with proper metacharacter escaping; on other platforms it
       // behaves identically to child_process.spawn.
-      const proc = crossSpawn(devcontainerBin(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const proc = crossSpawn(devcontainerBin(), args, { stdio: ['ignore', 'pipe', 'pipe'], env: env as NodeJS.ProcessEnv });
       let stdout = '';
       let stderr = '';
 
