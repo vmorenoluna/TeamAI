@@ -758,15 +758,21 @@ export class ContainerManager extends EventEmitter {
           // leaves root-owned files in node_modules/build output that the real user
           // (and the next install) then cannot touch.
           'exec', '-i', '-u', readContainerRemoteUser(projectRoot), '-w', workdir, record.containerId!, 'sh', '-c', step.command,
-        ]);
+        ], { timeout: validation.validationStepTimeoutMs(projectRoot, step.name) });
         step.status = 'passed';
         step.output = stdout.slice(-2000); // keep last 2KB for display
         this._emitValidation(projectRoot, step);
         this._emitLog(projectRoot, `  ✓ ${step.name} passed`);
       } catch (err: unknown) {
-        const execErr = err as { stderr?: string; stdout?: string; message?: string };
+        const execErr = err as { stderr?: string; stdout?: string; message?: string; killed?: boolean };
         step.status = 'failed';
         step.error = execErr.stderr || execErr.stdout || execErr.message || String(err);
+        if (execErr.killed) {
+          // The output tail alone reads like a mid-run crash; say what happened.
+          const minutes = Math.round(validation.validationStepTimeoutMs(projectRoot, step.name) / 60_000);
+          // At the end: failure reports keep only the tail of the error.
+          step.error = `${step.error}\n\n${step.name} was stopped after the ${minutes}-minute limit. Raise it with containerValidationTimeoutMinutes in .teamai/pipeline.json if the step is legitimately slower.`;
+        }
         step.output = execErr.stdout?.slice(-2000) || '';
         this._emitValidation(projectRoot, step);
         this._emitLog(projectRoot, `  ✗ ${step.name} FAILED`);
