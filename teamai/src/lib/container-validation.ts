@@ -202,3 +202,40 @@ export function describeFailure(record: Pick<ValidationRecord, 'failedStep' | 'e
     `"Re-validate" in Settings → Container.`
   );
 }
+
+// ── Step timeouts ─────────────────────────────────────────────────────────
+
+const MINUTE_MS = 60_000;
+
+/**
+ * Wall-clock cap per validation step. Validation is deterministic, so a cap is
+ * not there to bound the work — a large project's test suite can legitimately
+ * run for the better part of an hour — only to turn a hung step (stale build
+ * lock, stalled download, wedged Docker pipe) into a visible failure instead of
+ * blocking every agent forever.
+ */
+const DEFAULT_STEP_TIMEOUT_MINUTES: Record<string, number> = {
+  'Install dependencies': 30,
+  'Build': 30,
+  'Tests': 60,
+};
+/** Fast checks (tooling versions, native-module probe). */
+const FALLBACK_STEP_TIMEOUT_MINUTES = 5;
+
+/**
+ * Timeout in ms for a validation step. A project can override per step in
+ * `.teamai/pipeline.json`:
+ *
+ *   "containerValidationTimeoutMinutes": { "install": 45, "build": 30, "test": 90 }
+ */
+export function validationStepTimeoutMs(projectRoot: string, stepName: string): number {
+  const key = ({ 'Install dependencies': 'install', 'Build': 'build', 'Tests': 'test' } as Record<string, string>)[stepName];
+  if (key) {
+    try {
+      const raw = JSON.parse(readFileSync(path.join(projectRoot, '.teamai', 'pipeline.json'), 'utf-8'));
+      const minutes = raw?.containerValidationTimeoutMinutes?.[key];
+      if (typeof minutes === 'number' && Number.isFinite(minutes) && minutes > 0) return minutes * MINUTE_MS;
+    } catch { /* no pipeline.json, or unreadable — use the default */ }
+  }
+  return (DEFAULT_STEP_TIMEOUT_MINUTES[stepName] ?? FALLBACK_STEP_TIMEOUT_MINUTES) * MINUTE_MS;
+}
