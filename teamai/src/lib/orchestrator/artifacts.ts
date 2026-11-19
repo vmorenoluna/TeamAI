@@ -57,6 +57,7 @@ export const MAX_SCOPE_ARTIFACT_SUBTASKS = 50;
 export const SCOPE_ARTIFACTS: string[] = [
   ...Array.from({ length: MAX_SCOPE_ARTIFACT_SUBTASKS }, (_, i) => `scope_report-st${i + 1}.json`),
   ...Array.from({ length: MAX_SCOPE_ARTIFACT_SUBTASKS }, (_, i) => `scope_notes-st${i + 1}.json`),
+  ...Array.from({ length: MAX_SCOPE_ARTIFACT_SUBTASKS }, (_, i) => `scope_deferred-st${i + 1}.json`),
   'scope_verdicts.json',
   'scope_rejections.json',
 ];

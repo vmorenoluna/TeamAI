@@ -233,7 +233,7 @@ const REGISTRY_COVERAGE: RegistryExpectation[] = [
     inRevisionCleanup: true,
   },
   // ── Scope arbitration artifacts (cleared together with plan.json) ───────
-  ...['scope_report-st{N}.json', 'scope_notes-st{N}.json', 'scope_verdicts.json', 'scope_rejections.json'].map(file => ({
+  ...['scope_report-st{N}.json', 'scope_notes-st{N}.json', 'scope_deferred-st{N}.json', 'scope_verdicts.json', 'scope_rejections.json'].map(file => ({
     file,
     usedIn: ['implement.ts / scope-arbitration.ts (scope arbitration)'],
     inPhaseArtifacts: true,

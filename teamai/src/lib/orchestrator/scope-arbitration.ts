@@ -93,6 +93,32 @@ export function scopeReportPath(specPath: string, subtaskId: number): string {
   return path.join(specPath, `scope_report-st${subtaskId}.json`);
 }
 
+/**
+ * Marker left when a session changed unlisted files but scheduled a wakeup, so the
+ * hold was postponed. `base` is the HEAD before the FIRST such session.
+ */
+export interface ScopeDeferral { base: string }
+
+export function scopeDeferralPath(specPath: string, subtaskId: number): string {
+  return path.join(specPath, `scope_deferred-st${subtaskId}.json`);
+}
+
+/** The recorded deferral for a subtask, or null when none (or malformed). */
+export function readScopeDeferral(specPath: string, subtaskId: number): ScopeDeferral | null {
+  const d = readJson<ScopeDeferral>(scopeDeferralPath(specPath, subtaskId));
+  return d && typeof d.base === 'string' && d.base ? d : null;
+}
+
+/** Record a deferral. An existing record wins: the earliest base keeps covering every later session. */
+export function recordScopeDeferral(specPath: string, subtaskId: number, base: string): void {
+  if (!base || readScopeDeferral(specPath, subtaskId)) return;
+  try { atomicWriteJson(scopeDeferralPath(specPath, subtaskId), { base } satisfies ScopeDeferral); } catch { /* best-effort */ }
+}
+
+export function clearScopeDeferral(specPath: string, subtaskId: number): void {
+  try { unlinkSync(scopeDeferralPath(specPath, subtaskId)); } catch { /* none to clear */ }
+}
+
 function readScopeNotes(specPath: string, subtaskId: number): Map<string, string> {
   const notesPath = path.join(specPath, `scope_notes-st${subtaskId}.json`);
   const notes = new Map<string, string>();
