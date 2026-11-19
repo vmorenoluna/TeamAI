@@ -252,6 +252,14 @@ function _autoApprove(taskId: string, projectRoot: string, state: AutoProjectSta
   getOrchestrator(projectRoot).approveTask(taskId, 'pull-request')
     .catch(err => {
       logError('auto-mode', `Failed to auto-approve task ${taskId}`, err);
+    })
+    .finally(() => {
+      // The guard only covers the in-flight window. approveTask settles when
+      // the approved phase run ends — however it ends (PR opened, rate-limit
+      // pause, nothing to merge, rework bounce back to awaiting-review).
+      // Clearing only on pr-open/failure left the id stuck for every other
+      // outcome, so the task's next awaiting-review was silently skipped by
+      // the `has()` check above with nothing logged.
       state.autoApprovedIds.delete(taskId);
     });
   return true;
