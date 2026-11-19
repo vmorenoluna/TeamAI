@@ -844,6 +844,28 @@ describe('Auto Mode Integration', () => {
       expect(mockOrch.approveTask).toHaveBeenCalledTimes(1);
     });
 
+    it('approves again after an earlier approval settled without reaching pr-open', async () => {
+      // Regression: the in-flight guard used to be cleared only on pr-open or
+      // failure, so an approval that resolved any other way (rate-limit pause,
+      // nothing to merge, rework bounce) left the id stuck and the task's next
+      // awaiting-review was silently skipped — no PR, no log line.
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      mockOrch.approveTask.mockClear();
+      mockOrch.approveTask.mockResolvedValue(undefined);
+
+      fireEvent('phase-change', { taskId, phase: 'awaiting-review', projectRoot: testDir });
+      await vi.waitFor(() => expect(mockOrch.approveTask).toHaveBeenCalledTimes(1));
+      await new Promise(r => setTimeout(r, 20));
+
+      fireEvent('phase-change', { taskId, phase: 'awaiting-review', projectRoot: testDir });
+      await vi.waitFor(() => expect(mockOrch.approveTask).toHaveBeenCalledTimes(2));
+    });
+
     it('does NOT auto-approve when auto mode is disabled', async () => {
       mockOrch.approveTask.mockClear();
 
