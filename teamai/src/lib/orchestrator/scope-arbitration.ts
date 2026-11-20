@@ -94,8 +94,9 @@ export function scopeReportPath(specPath: string, subtaskId: number): string {
 }
 
 /**
- * Marker left when a session changed unlisted files but scheduled a wakeup, so the
- * hold was postponed. `base` is the HEAD before the FIRST such session.
+ * Marker left when a subtask's session scheduled a wakeup. `base` is the HEAD before the
+ * FIRST such session; later sessions of the subtask measure scope from it, because a
+ * re-entry's own diff is empty once the earlier session's work is committed.
  */
 export interface ScopeDeferral { base: string }
 
