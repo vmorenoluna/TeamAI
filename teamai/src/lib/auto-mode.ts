@@ -205,6 +205,46 @@ function _start(projectRoot: string, state: AutoProjectState): void {
   log('auto-mode', `Started for ${projectRoot} (max parallel: ${state.maxParallel})`);
 }
 
+/** How long to wait for the run that parked a task in awaiting-review to unwind. */
+const APPROVE_RETRY_DELAY_MS = 500;
+const APPROVE_RETRY_ATTEMPTS = 40;
+
+/**
+ * Call approveTask, retrying while the run that just parked the task is still
+ * unwinding.
+ *
+ * The 'awaiting-review' phase-change event is emitted synchronously from inside
+ * the QA run, which stays registered as active until it returns.
+ * approveTask rejects with TASK_ALREADY_RUNNING in that window, and the event
+ * is the only trigger — the tick loop skips paused phases — so giving up on
+ * that rejection left the task in awaiting-review with no PR and only a log
+ * line. Retry until the run releases the task, the task is no longer awaiting
+ * review (someone else approved/rejected it), or auto mode is switched off.
+ */
+async function _approveWhenRunSettled(taskId: string, projectRoot: string, state: AutoProjectState): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await getOrchestrator(projectRoot).approveTask(taskId, 'pull-request');
+      return;
+    } catch (err) {
+      // Match on the code, not instanceof: the error may come from another module graph.
+      const stillRunning = (err as { code?: unknown } | null)?.code === 'TASK_ALREADY_RUNNING';
+      if (!stillRunning || attempt >= APPROVE_RETRY_ATTEMPTS) throw err;
+      if (attempt === 1) {
+        log('auto-mode', `Task ${taskId} still unwinding its previous run — retrying auto-approve`);
+      }
+      await new Promise(resolve => setTimeout(resolve, APPROVE_RETRY_DELAY_MS));
+      if (!state.enabled) {
+        log('auto-mode', `Auto mode disabled — dropping pending auto-approve for task ${taskId}`);
+        return;
+      }
+      try {
+        if (new TaskStore(projectRoot).getById(taskId)?.phase !== 'awaiting-review') return;
+      } catch { /* can't read the store — try approving anyway */ }
+    }
+  }
+}
+
 /**
  * Auto-approve a task sitting in awaiting-review. Shared by the phase-change
  * listener and _adoptStalledTasks.
@@ -249,7 +289,8 @@ function _autoApprove(taskId: string, projectRoot: string, state: AutoProjectSta
   }
 
   state.autoApprovedIds.add(taskId);
-  getOrchestrator(projectRoot).approveTask(taskId, 'pull-request')
+  log('auto-mode', `Auto-approving task ${taskId} (awaiting-review → create-pr)`);
+  _approveWhenRunSettled(taskId, projectRoot, state)
     .catch(err => {
       logError('auto-mode', `Failed to auto-approve task ${taskId}`, err);
     })
