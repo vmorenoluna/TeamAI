@@ -4924,6 +4924,104 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
     const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
     expect(plan.subtasks.find((s: any) => s.id === 3).completed).toBe(true);
   });
+
+  // The first session edited and committed an assigned file, then waited on a
+  // background job; the re-entry session reads the green result and edits
+  // nothing. Its own diff is empty, but scope is measured from the base
+  // recorded when the subtask first scheduled its wakeup, so the earlier
+  // edit counts and the subtask completes instead of being rejected as a no-op.
+  describe('wakeup re-entry that edits nothing', () => {
+    const subtask: PlanSubtask = {
+      id: 3,
+      title: 'Run the job',
+      description: 'Run the job',
+      files: ['scripts/long_job.py', 'scripts/other.py'],
+      acceptance_criteria: ['Job passes'],
+      depends_on: [],
+    };
+
+    async function reenter(recordedBase: string | null) {
+      writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({ subtasks: [subtask] }));
+      if (recordedBase) writeFileSync(join(project.taskDir, 'scope_deferred-st3.json'), JSON.stringify({ base: recordedBase }));
+      mockCreateSession.mockResolvedValue('sess-reentry-noedit');
+      const worktreePath = join(project.root, 'worktrees', 'test-task');
+      mkdirSync(join(worktreePath, 'scripts/job_logs'), { recursive: true });
+      writeFileSync(join(worktreePath, 'scripts/job_logs/evidence.log'), 'job evidence');
+      mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+        if (Array.isArray(args)) {
+          if (args[0] === 'rev-parse') return 'abc123\n';
+          // Only the first session's base sees the committed edit; this session's own diff is empty.
+          if (args[0] === 'diff' && args[1] === '--name-only' && args[2] === 'firstbase..HEAD') return 'scripts/long_job.py\n';
+        }
+        return '';
+      });
+      const pipeline = makePipeline(project.taskId, project.taskDir, {
+        phase: 'implement', qaAttempt: 0, worktreePath,
+        wakeupSubtaskId: 3, wakeupCommand: 'python long_job.py', wakeupArtifact: 'scripts/job_logs/evidence.log', wakeupAttemptCount: 1,
+        wakeupArtifactMtimeAtSchedule: Date.now() - 60_000,
+      });
+      const ctx = (orch as AnyOrch)._ctx;
+      const completedIds: number[] = [];
+      const scopeViolations = new Set<number>();
+      const promise = runSubtaskSession(
+        pipeline, ctx, subtask, pipeline.worktreePath,
+        join(project.taskDir, 'output.log'),
+        false, false, join(project.taskDir, 'human_feedback.md'),
+        completedIds, scopeViolations, { current: Promise.resolve() },
+      );
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
+      fireEvent('event', { sessionId: 'sess-reentry-noedit', event: { type: 'result' } });
+      await promise;
+      return { completedIds, scopeViolations };
+    }
+
+    it('completes when the subtask recorded a base at its first wakeup', async () => {
+      const { completedIds, scopeViolations } = await reenter('firstbase');
+      expect(scopeViolations.has(3)).toBe(false);
+      expect(completedIds).toContain(3);
+      // The marker is consumed with the completion.
+      expect(existsSync(join(project.taskDir, 'scope_deferred-st3.json'))).toBe(false);
+    });
+
+    it('records the base when a session schedules a wakeup without touching unlisted files', async () => {
+      writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({ subtasks: [subtask] }));
+      mockCreateSession.mockResolvedValue('sess-first-wakeup');
+      const worktreePath = join(project.root, 'worktrees', 'test-task');
+      mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+        if (Array.isArray(args)) {
+          if (args[0] === 'rev-parse') return 'firstbase\n';
+          if (args[0] === 'diff' && args[1] === '--name-only') return 'scripts/long_job.py\n';
+        }
+        return '';
+      });
+      const pipeline = makePipeline(project.taskId, project.taskDir, { phase: 'implement', qaAttempt: 0, worktreePath });
+      const ctx = (orch as AnyOrch)._ctx;
+      const promise = runSubtaskSession(
+        pipeline, ctx, subtask, pipeline.worktreePath,
+        join(project.taskDir, 'output.log'),
+        false, false, join(project.taskDir, 'human_feedback.md'),
+        [], new Set<number>(), { current: Promise.resolve() },
+      );
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
+      writeFileSync(join(project.taskDir, 'subtask_wakeup-st3.json'), JSON.stringify({
+        subtask_id: 3,
+        wakeup_at: '2099-01-01T00:00:00Z',
+        background_command: 'python long_job.py',
+        expected_artifact: 'scripts/job_logs/evidence.log',
+      }));
+      fireEvent('event', { sessionId: 'sess-first-wakeup', event: { type: 'result' } });
+      await promise;
+
+      expect(pipeline.wakeupSubtaskId).toBe(3);
+      expect(JSON.parse(readFileSync(join(project.taskDir, 'scope_deferred-st3.json'), 'utf-8'))).toEqual({ base: 'firstbase' });
+    });
+
+    it('is still rejected as a no-op when no base was recorded and nothing changed', async () => {
+      const { completedIds, scopeViolations } = await reenter(null);
+      expect(scopeViolations.has(3)).toBe(true);
+      expect(completedIds).not.toContain(3);
+    });
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════

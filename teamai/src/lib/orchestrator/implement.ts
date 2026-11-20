@@ -2105,18 +2105,21 @@ export async function runSubtaskSession(
     preSessionHead = (await deps.execGitCapture(['rev-parse', 'HEAD'], cwd)).trim();
   } catch { /* best-effort — scope check is skipped if snapshot fails */ }
 
-  // A hold postponed by an earlier session's wakeup (see the deferral branch
-  // below) must be measured from that session's start: this session's own
-  // diff is empty when the work was already committed, which the no-op check
-  // would reject forever. Falls back to this session's HEAD when the recorded
-  // base is no longer an ancestor (history rewritten).
+  // A subtask that waits on a wakeup spans sessions: the first edits and
+  // commits, the re-entry reads the result and legitimately edits nothing.
+  // Scope (the no-op check and the unlisted-file hold) is therefore measured
+  // from the HEAD recorded when the subtask first scheduled a wakeup (see the
+  // record below), not from this session's own start — its diff is empty once
+  // the work is committed, which the no-op check would reject forever. Falls
+  // back to this session's HEAD when the recorded base is no longer an
+  // ancestor (history rewritten).
   let scopeBase = preSessionHead;
   const deferral = preSessionHead && subtask.id !== 9999 ? readScopeDeferral(pipeline.specPath, subtask.id) : null;
   if (deferral) {
     try {
       await deps.execGitCapture(['merge-base', '--is-ancestor', deferral.base, 'HEAD'], cwd);
       scopeBase = deferral.base;
-      logToOutput(pipeline.specPath, '[SCOPE] Subtask ' + subtask.id + ' has a deferred scope hold — measuring unlisted files from ' + deferral.base.slice(0, 8) + '\n');
+      logToOutput(pipeline.specPath, '[SCOPE] Subtask ' + subtask.id + ' spans a wakeup — measuring scope from ' + deferral.base.slice(0, 8) + '\n');
     } catch {
       clearScopeDeferral(pipeline.specPath, subtask.id);
     }
@@ -2181,9 +2184,11 @@ export async function runSubtaskSession(
 
   // Unlisted files: hold the subtask for planner arbitration instead of
   // completing it. A session that scheduled a wakeup is not held — it is not
-  // finishing this session. The deferral is recorded (scope_deferred-st<N>.json)
-  // so the session that finishes waiting measures from the same base: its own
-  // diff no longer contains the unlisted files once they are committed.
+  // finishing this session. Every wakeup session records its base
+  // (scope_deferred-st<N>.json, below) so the session that finishes waiting
+  // measures from the same base: its own diff no longer contains the committed
+  // edits, whether they are unlisted files (held then) or assigned ones (not
+  // a no-op).
   if (unlistedFiles.length > 0 && !wakeupDetected) {
     // A re-entry that ends here has finished waiting on its job; the hold
     // returns before the completion block below, which would otherwise be
@@ -2200,12 +2205,13 @@ export async function runSubtaskSession(
     logToOutput(pipeline.specPath,
       '\n[SCOPE] Subtask ' + subtask.id + ' changed unlisted files but scheduled a wakeup — not held this session:\n' +
       unlistedFiles.map(f => '  - ' + f).join('\n') + '\n');
-    recordScopeDeferral(pipeline.specPath, subtask.id, scopeBase);
   } else {
-    clearScopeDeferral(pipeline.specPath, subtask.id);
     // No report is written, so the coder's scope notes (if any) have no reader.
     try { unlinkSync(path.join(pipeline.specPath, 'scope_notes-st' + subtask.id + '.json')); } catch { /* none to consume */ }
   }
+
+  if (wakeupDetected) recordScopeDeferral(pipeline.specPath, subtask.id, scopeBase);
+  else clearScopeDeferral(pipeline.specPath, subtask.id);
 
   // Verify deliverable files exist before marking subtask complete.
   // Gated on wakeupDetected (THIS session scheduled a fresh wakeup), not on
