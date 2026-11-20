@@ -120,9 +120,17 @@ export async function replayInProgress(
   // CHERRY_PICK_HEAD / REBASE_HEAD exist exactly while the operation is stopped. A real
   // `git rev-parse --verify` either fails or prints a full object id, so anything else is "not in progress".
   const ref = kind === 'cherry-pick' ? 'CHERRY_PICK_HEAD' : 'REBASE_HEAD';
+  let present: boolean;
   try {
-    return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test((await deps.execGitCapture(['rev-parse', '--verify', '-q', ref], wt)).trim());
+    present = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test((await deps.execGitCapture(['rev-parse', '--verify', '-q', ref], wt)).trim());
   } catch { return false; }
+  if (!present || kind !== 'rebase') return present;
+  // A finished rebase can leave a stale REBASE_HEAD behind. A stopped rebase always has a detached HEAD,
+  // a finished one is back on its branch — so `symbolic-ref` succeeding means nothing is in progress.
+  try {
+    await deps.execGitCapture(['symbolic-ref', '-q', 'HEAD'], wt);
+    return false;
+  } catch { return true; }
 }
 
 export async function abortReplay(
@@ -276,7 +284,12 @@ export async function driveReplay(deps: ReplayDeps, o: ReplayOptions): Promise<v
         // the replayed commit became empty after the resolution: skip it.
         if (!(await unmergedFiles(deps, wt)) && await replayInProgress(deps, o.kind, wt)) {
           logToOutput(o.logDir, `\n${prefix}Replayed commit is empty after the resolution — skipping it\n`);
-          await deps.execGit([o.kind, '--skip'], wt);
+          try {
+            await deps.execGit([o.kind, '--skip'], wt);
+          } catch (skipErr) {
+            // The operation ended on its own (the continue finished it): nothing left to skip.
+            if (!/no (?:rebase|cherry-pick) in progress/i.test(String((skipErr as Error)?.message ?? skipErr))) throw skipErr;
+          }
         }
       }
     }

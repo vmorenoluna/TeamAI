@@ -38,7 +38,7 @@ type Kind = 'rebase' | 'cherry-pick';
  * conflicts are gone (0 = no conflict at that stop). `--continue` / `--skip`
  * move to the next stop; the operation ends after the last one.
  */
-function scriptedGit(stops: number[], opts: { kind?: Kind; started?: boolean; emptyCommitAt?: number } = {}) {
+function scriptedGit(stops: number[], opts: { kind?: Kind; started?: boolean; emptyCommitAt?: number; staleRebaseHead?: boolean } = {}) {
   const kind = opts.kind ?? 'rebase';
   const dir = mkdtempSync(join(tmpdir(), 'replay-driver-'));
   const logDir = mkdtempSync(join(tmpdir(), 'replay-driver-log-'));
@@ -78,8 +78,13 @@ function scriptedGit(stops: number[], opts: { kind?: Kind; started?: boolean; em
     // "In progress" is asked of git (REBASE_HEAD / CHERRY_PICK_HEAD), never of the host filesystem: `dir` holds
     // no .git at all, and in container mode git reports container paths that do not exist on the host.
     if (args[0] === 'rev-parse' && (args.includes('CHERRY_PICK_HEAD') || args.includes('REBASE_HEAD'))) {
-      if (!inProgress) throw new Error('fatal: Needed a single revision');
+      if (!inProgress && !opts.staleRebaseHead) throw new Error('fatal: Needed a single revision');
       return '0123456789abcdef0123456789abcdef01234567\n';
+    }
+    // A stopped rebase has a detached HEAD; a finished one is back on its branch.
+    if (args[0] === 'symbolic-ref') {
+      if (inProgress) throw new Error('fatal: ref HEAD is not a symbolic ref');
+      return 'refs/heads/feat/x\n';
     }
     if (args[0] === 'diff') return hasConflict() ? 'src/a.ts\n' : '';
     return '';
@@ -156,6 +161,22 @@ describe('driveReplay', () => {
     const g = scriptedGit([1], { started: true, emptyCommitAt: 0 });
     await g.drive();
     expect(g.flat().some(c => c === 'rebase --skip')).toBe(true);
+  });
+
+  it('ignores a stale REBASE_HEAD left behind by a finished rebase (HEAD is back on its branch)', async () => {
+    const g = scriptedGit([0], { staleRebaseHead: true });
+    await g.drive();
+    expect(g.flat().some(c => c.includes('--skip') || c.includes('--continue'))).toBe(false);
+  });
+
+  it('treats "no rebase in progress" from --skip as the rebase having finished', async () => {
+    const g = scriptedGit([1], { started: true, emptyCommitAt: 0 });
+    const base = g.deps.execGit.getMockImplementation()!;
+    g.deps.execGit.mockImplementation(async (args: string[]) => {
+      if (args.includes('--skip')) throw new Error('fatal: no rebase in progress');
+      return base(args);
+    });
+    await expect(g.drive()).resolves.toBeUndefined();
   });
 
   it('drives a cherry-pick with the cherry-pick commands and the resolve-cherry-pick command', async () => {
