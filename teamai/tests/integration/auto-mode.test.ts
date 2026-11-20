@@ -18,7 +18,7 @@ import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
-import { ContainerDockerMissingError } from '@/lib/orchestrator/errors';
+import { ContainerDockerMissingError, TaskAlreadyRunningError } from '@/lib/orchestrator/errors';
 
 // ── Hoisted mocks ────────────────────────────────────────────────────────────
 
@@ -864,6 +864,28 @@ describe('Auto Mode Integration', () => {
 
       fireEvent('phase-change', { taskId, phase: 'awaiting-review', projectRoot: testDir });
       await vi.waitFor(() => expect(mockOrch.approveTask).toHaveBeenCalledTimes(2));
+    });
+
+    it('retries the approval while the run that parked the task is still unwinding', async () => {
+      // Regression: awaiting-review is emitted from inside the QA run, which is
+      // still registered as active, so approveTask rejects with
+      // TASK_ALREADY_RUNNING. Giving up there left the task parked with no PR.
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      const { TaskStore } = await import('@/lib/task-store');
+      new TaskStore(testDir).updatePhase(taskId, 'awaiting-review');
+      mockOrch.approveTask.mockReset();
+      mockOrch.approveTask
+        .mockRejectedValueOnce(new TaskAlreadyRunningError(taskId))
+        .mockResolvedValue(undefined);
+
+      fireEvent('phase-change', { taskId, phase: 'awaiting-review', projectRoot: testDir });
+
+      await vi.waitFor(() => expect(mockOrch.approveTask).toHaveBeenCalledTimes(2), { timeout: 3000 });
     });
 
     it('does NOT auto-approve when auto mode is disabled', async () => {
