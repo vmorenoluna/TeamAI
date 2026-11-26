@@ -94,6 +94,16 @@ it detached anyway. Detach from the start.
    One start + one wait is the complete pattern. See below for progress-based waiting.
 5. Capture only the summary line from the output (pass/fail count, error list) —
    do not read the full output into context unless a failure requires diagnosis.
+6. **You may not end the session while a job you chose to wait out is still running.**
+   A background job you intend to finish within this session (you did NOT write a
+   `subtask_wakeup-st<ID>.json` for it) binds your session: do not end your turn until
+   its completion notification has arrived and you have recorded its result. The
+   orchestrator cannot see your background process. A session that ends early looks like
+   a subtask that stopped without touching its files, so the orchestrator rejects it and
+   runs its normal per-subtask worktree cleanup and integration while your job still has
+   files open there. That cleanup can delete or truncate files under the running job
+   (jars, `lib/`, build output), corrupting the run and the worktree. If you cannot wait
+   for the job inside this session, use the wakeup mechanism below instead.
 
 ### When background output is unreadable
 
@@ -329,3 +339,12 @@ re-verify what you already verified. Only use this when you've done the
 investigation and are confident retrying is pointless; if there's a real
 chance a fresh session (or waiting on a background job) could still resolve
 this, use the wakeup mechanism above or just end normally instead.
+
+**If you resolve the blocker, retract the file.** If you wrote
+`subtask_blocked-st<ID>.json` earlier in this session but then went on to complete
+the subtask successfully (tests pass, the work is committed, the acceptance criteria
+are met), you MUST delete `subtask_blocked-st<ID>.json` before ending the session.
+The orchestrator checks for that file when your session ends and treats it as the
+authoritative, final verdict. It does not re-derive the verdict from your summary or
+your commits, so a stale blocked file left in place after you fixed the problem
+overrides the real success and fails the whole task.
