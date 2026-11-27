@@ -210,6 +210,15 @@ Rules:
   that made no edit as a no-op, re-runs it, and fails the task after 3 passes —
   even though the run itself succeeded. Do NOT set it on subtasks expected to
   change files.
+- **Conditional regeneration subtasks set `"verify_only": true` too.** A subtask that
+  regenerates committed output (goldens, snapshots, generated fixtures) and then
+  inspects the diff may legitimately find nothing to change, because an earlier
+  subtask already regenerated it. Such a subtask is conditional: it edits files only if
+  the output drifted. Set `"verify_only": true` and keep the regenerated files in
+  `files`. Without the flag, a no-edit pass is accepted only when every file in
+  `files` already differs from the base branch. When only some of them do, the pass is
+  rejected as a no-op, re-run, and the task fails after 3 passes even though the
+  regeneration was correct.
 - **`files_to_create` paths are relative to the repository root.** When populating
   `files_to_create` for a subtask that must produce committed file artifacts
   (benchmark output, data pipeline output, generated documentation),
